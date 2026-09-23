@@ -12,7 +12,10 @@ import (
 	"github.com/IgorMirkhanov/ledger-core/internal/transfers/domain"
 )
 
-var ErrNotImplemented = errors.New("not implemented")
+var (
+	ErrNotImplemented   = errors.New("not implemented")
+	ErrConcurrentUpdate = errors.New("CONCURRENT_UPDATE")
+)
 
 const TopicTransferEvents = "ledger.transfers.v1"
 
