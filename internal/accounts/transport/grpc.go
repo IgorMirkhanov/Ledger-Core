@@ -3,6 +3,8 @@
 package transport
 
 import (
+	"errors"
+
 	"google.golang.org/grpc/codes"
 
 	accountsv1 "github.com/IgorMirkhanov/ledger-core/gen/ledger/accounts/v1"
@@ -13,6 +15,9 @@ import (
 )
 
 const ErrorDomain = "ledger.accounts"
+
+// errCallerNotTransfers rejects hold RPCs that are not from the transfers service.
+var errCallerNotTransfers = errors.New("CALLER_NOT_TRANSFERS")
 
 // Errors maps domain errors to gRPC codes. The ErrorInfo.reason is the sentinel text.
 var Errors = grpcx.ErrorMapping{
@@ -29,6 +34,7 @@ var Errors = grpcx.ErrorMapping{
 	idempotency.ErrKeyMissing:   codes.InvalidArgument,
 	idempotency.ErrKeyInvalid:   codes.InvalidArgument,
 	service.ErrNotImplemented:   codes.Unimplemented,
+	errCallerNotTransfers:       codes.PermissionDenied,
 }
 
 // Handler implements accountsv1.AccountsServiceServer.
@@ -39,3 +45,5 @@ type Handler struct {
 }
 
 func NewHandler(svc *service.Service) *Handler { return &Handler{svc: svc} }
+
+var _ accountsv1.AccountsServiceServer = (*Handler)(nil)
