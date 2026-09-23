@@ -207,7 +207,7 @@ func (f *fakeRepo) LockHold(_ context.Context, _ postgres.Querier, id uuid.UUID)
 
 func (f *fakeRepo) UpdateHold(context.Context, postgres.Querier, *domain.Hold) error { return nil }
 
-func (f *fakeRepo) LockExpiredHolds(context.Context, postgres.Querier, time.Time, int) ([]*domain.Hold, error) {
+func (f *fakeRepo) LockExpiredHolds(context.Context, postgres.Querier, time.Time, int, []uuid.UUID) ([]*domain.Hold, error) {
 	return nil, nil
 }
 

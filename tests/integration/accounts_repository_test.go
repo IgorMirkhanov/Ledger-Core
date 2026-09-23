@@ -322,7 +322,7 @@ func TestAccountsRepository_LockExpiredHoldsDisjoint(t *testing.T) {
 			errs[i] = txm.WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 				ready.Done()
 				<-start
-				holds, err := repo.LockExpiredHolds(ctx, tx, now, 10)
+				holds, err := repo.LockExpiredHolds(ctx, tx, now, 10, nil)
 				got[i] = holds
 				holding.Done()
 				if err != nil {

@@ -473,7 +473,7 @@ func (s *Service) ExpireHolds(ctx context.Context, batch int) (int, error) {
 	var n int
 	err := s.tx.WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		now := s.clock.Now()
-		holds, err := s.repo.LockExpiredHolds(ctx, tx, now, batch)
+		holds, err := s.repo.LockExpiredHolds(ctx, tx, now, batch, nil)
 		if err != nil {
 			return err
 		}
@@ -521,6 +521,48 @@ func (s *Service) ExpireHolds(ctx context.Context, batch int) (int, error) {
 		return 0, err
 	}
 	return n, nil
+}
+
+// ExpireNextHold expires one hold not listed in skip, in its own transaction.
+// The id is returned even when the hold itself fails, so the caller can skip it.
+// uuid.Nil and a nil error means nothing was due.
+func (s *Service) ExpireNextHold(ctx context.Context, skip []uuid.UUID) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := s.tx.WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		now := s.clock.Now()
+		holds, err := s.repo.LockExpiredHolds(ctx, tx, now, 1, skip)
+		if err != nil {
+			return err
+		}
+		if len(holds) == 0 {
+			return nil
+		}
+		h := holds[0]
+		id = h.ID
+		locked, err := s.repo.LockAccounts(ctx, tx, []uuid.UUID{h.AccountID})
+		if err != nil {
+			return err
+		}
+		acc := locked[h.AccountID]
+		if err := acc.Unreserve(h.Amount, now); err != nil {
+			return err
+		}
+		if err := h.Expire(now); err != nil {
+			return err
+		}
+		if err := s.repo.UpdateHold(ctx, tx, h); err != nil {
+			return err
+		}
+		if err := s.addEvent(ctx, tx, "hold.released", "hold", h.ID.String(), holdReleased{
+			HoldID:    h.ID.String(),
+			AccountID: acc.ID.String(),
+			Reason:    "expired",
+		}); err != nil {
+			return err
+		}
+		return s.repo.UpdateBalances(ctx, tx, acc)
+	})
+	return id, err
 }
 
 func checkOwner(owner uuid.UUID, acc *domain.Account) error {

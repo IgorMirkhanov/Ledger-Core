@@ -263,14 +263,18 @@ func (r *Repository) UpdateHold(ctx context.Context, q postgres.Querier, h *doma
 	return nil
 }
 
-func (r *Repository) LockExpiredHolds(ctx context.Context, q postgres.Querier, now time.Time, limit int) ([]*domain.Hold, error) {
+func (r *Repository) LockExpiredHolds(ctx context.Context, q postgres.Querier, now time.Time, limit int, skip []uuid.UUID) ([]*domain.Hold, error) {
+	if skip == nil {
+		skip = []uuid.UUID{}
+	}
 	rows, err := q.Query(ctx, `
 		SELECT id, account_id, amount, status, reference_id, expires_at, journal_entry_id, created_at, updated_at
 		FROM holds
 		WHERE status = 'active' AND expires_at <= $1
+		  AND NOT (id = ANY($3::uuid[]))
 		ORDER BY expires_at
 		LIMIT $2
-		FOR UPDATE SKIP LOCKED`, now, limit)
+		FOR UPDATE SKIP LOCKED`, now, limit, skip)
 	if err != nil {
 		return nil, fmt.Errorf("accounts: lock expired holds: %w", err)
 	}

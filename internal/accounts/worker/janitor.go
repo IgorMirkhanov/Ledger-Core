@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/idempotency"
@@ -16,19 +17,22 @@ type Janitor struct {
 	retention time.Duration
 	interval  time.Duration
 	batch     int
+	sweep     func(context.Context) error
 }
 
 func NewJanitor(q postgres.Querier, retention time.Duration) *Janitor {
 	if retention <= 0 {
 		retention = 168 * time.Hour
 	}
-	return &Janitor{
+	j := &Janitor{
 		q:         q,
 		idem:      idempotency.NewStore(),
 		retention: retention,
 		interval:  10 * time.Minute,
 		batch:     1000,
 	}
+	j.sweep = j.Sweep
+	return j
 }
 
 func (j *Janitor) Name() string { return "janitor" }
@@ -41,8 +45,13 @@ func (j *Janitor) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-timer.C:
-			if err := j.Sweep(ctx); err != nil {
-				return err
+			fn := j.sweep
+			if fn == nil {
+				fn = j.Sweep
+			}
+			if err := fn(ctx); err != nil && ctx.Err() == nil {
+				workerErrors.WithLabelValues(j.Name()).Inc()
+				slog.Error("janitor sweep", slog.String("component", j.Name()), slog.Any("error", err))
 			}
 			timer.Reset(j.interval)
 		}

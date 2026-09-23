@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"math/rand/v2"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -18,7 +19,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
-	"math/rand/v2"
 
 	accountsv1 "github.com/IgorMirkhanov/ledger-core/gen/ledger/accounts/v1"
 	accountsvc "github.com/IgorMirkhanov/ledger-core/internal/accounts/service"

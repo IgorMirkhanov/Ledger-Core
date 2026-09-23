@@ -122,7 +122,7 @@ func TestTransfersRepository_ClaimPendingSkipLocked(t *testing.T) {
 	usd := mustCurrency(t, "USD")
 	base := time.Now().UTC().Truncate(time.Microsecond)
 
-	var pending []uuid.UUID
+	pending := make([]uuid.UUID, 0, 3)
 	for i := range 3 {
 		at := base.Add(-time.Duration(3-i) * time.Second)
 		tr, err := domain.NewTransfer(uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()),

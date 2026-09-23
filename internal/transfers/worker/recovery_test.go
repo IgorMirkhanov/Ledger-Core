@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func TestRecovery_AdvancesClaimedWithBoundedParallelism(t *testing.T) {
 	require.Eventually(t, func() bool { return fake.advanced.Load() == int32(len(ids)) }, 3*time.Second, 10*time.Millisecond)
 	require.LessOrEqual(t, int(fake.max.Load()), 10)
 	cancel()
-	require.ErrorIs(t, <-done, context.Canceled)
+	require.NoError(t, <-done)
 }
 
 type fakeSaga struct {
@@ -54,6 +55,38 @@ func (f *fakeSaga) Advance(context.Context, uuid.UUID) (*domain.Transfer, error)
 	}
 	time.Sleep(20 * time.Millisecond)
 	f.inflight.Add(-1)
+	f.advanced.Add(1)
+	return &domain.Transfer{}, nil
+}
+
+func TestRecovery_LogsClaimErrorAndContinues(t *testing.T) {
+	id := uuid.Must(uuid.NewV7())
+	fake := &flakySaga{id: id, claimErr: errors.New("db down")}
+	w := &Recovery{svc: fake, interval: 15 * time.Millisecond, limit: 50, parallel: 10}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+
+	require.Eventually(t, func() bool { return fake.advanced.Load() == 1 && fake.claims.Load() >= 2 }, 2*time.Second, 10*time.Millisecond)
+	cancel()
+	require.NoError(t, <-done)
+}
+
+type flakySaga struct {
+	id       uuid.UUID
+	claimErr error
+	claims   atomic.Int32
+	advanced atomic.Int32
+}
+
+func (f *flakySaga) ClaimPending(context.Context, int) ([]uuid.UUID, error) {
+	if f.claims.Add(1) == 1 {
+		return nil, f.claimErr
+	}
+	return []uuid.UUID{f.id}, nil
+}
+
+func (f *flakySaga) Advance(context.Context, uuid.UUID) (*domain.Transfer, error) {
 	f.advanced.Add(1)
 	return &domain.Transfer{}, nil
 }

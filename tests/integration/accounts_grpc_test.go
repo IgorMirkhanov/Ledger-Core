@@ -26,7 +26,7 @@ func TestGRPC_SameKeyTwoOwnersAndReplayHeader(t *testing.T) {
 	pool := testenv.MigratedPool(t, migrations.Accounts())
 	client := startAccountsClient(t, newAccountsService(pool))
 
-	var ids []string
+	ids := make([]string, 0, 2)
 	for range 2 {
 		owner := uuid.Must(uuid.NewV7())
 		callCtx := metadata.AppendToOutgoingContext(ctx,

@@ -51,7 +51,8 @@ type Repository interface {
 	LockHold(ctx context.Context, q postgres.Querier, id uuid.UUID) (*domain.Hold, error)
 	UpdateHold(ctx context.Context, q postgres.Querier, h *domain.Hold) error
 	// LockExpiredHolds returns up to limit active holds with expires_at <= now, FOR UPDATE SKIP LOCKED.
-	LockExpiredHolds(ctx context.Context, q postgres.Querier, now time.Time, limit int) ([]*domain.Hold, error)
+	// skip is excluded so a hold that failed alone is not selected again in the same pass.
+	LockExpiredHolds(ctx context.Context, q postgres.Querier, now time.Time, limit int, skip []uuid.UUID) ([]*domain.Hold, error)
 
 	// Statement returns postings of an account ordered by id DESC, starting before cursor (0 = newest).
 	Statement(ctx context.Context, q postgres.Querier, f StatementFilter) ([]StatementLine, error)
