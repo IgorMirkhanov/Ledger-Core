@@ -42,6 +42,7 @@ domain-слой). Cursor реализует механику по пошагов
 |---|--------|-----------|-----------|
 | 01 | testing-foundation | — | testcontainers, тесты схемы/idempotency/outbox |
 | 02 | kafka-consumer | 01 | consumer + DLQ |
+| 02a | consumer-rebalance | 02 | исправление по ревью: rebalance, shutdown |
 | 03 | observability | — | трейсинг, метрики, дашборд |
 | 04 | accounts-repository | 01 | pgx repository |
 | 05 | accounts-service-grpc | 04 | **рабочий ledger** + тест конкурентности |
