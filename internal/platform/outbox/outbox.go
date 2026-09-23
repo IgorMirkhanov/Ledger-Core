@@ -86,3 +86,18 @@ func (w *Writer) Add(ctx context.Context, q postgres.Querier, e Event) error {
 	}
 	return nil
 }
+
+// DeletePublished removes up to limit rows published before olderThan.
+func DeletePublished(ctx context.Context, q postgres.Querier, olderThan time.Time, limit int) (int64, error) {
+	tag, err := q.Exec(ctx, `
+		DELETE FROM outbox
+		WHERE ctid IN (
+			SELECT ctid FROM outbox
+			WHERE published_at IS NOT NULL AND published_at < $1
+			LIMIT $2
+		)`, olderThan, limit)
+	if err != nil {
+		return 0, fmt.Errorf("outbox: cleanup: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

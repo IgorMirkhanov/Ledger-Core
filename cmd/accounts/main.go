@@ -7,8 +7,10 @@ import (
 	"os"
 
 	accountsv1 "github.com/IgorMirkhanov/ledger-core/gen/ledger/accounts/v1"
+	"github.com/IgorMirkhanov/ledger-core/internal/accounts/repository"
 	"github.com/IgorMirkhanov/ledger-core/internal/accounts/service"
 	"github.com/IgorMirkhanov/ledger-core/internal/accounts/transport"
+	"github.com/IgorMirkhanov/ledger-core/internal/accounts/worker"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/app"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/config"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/grpcx"
@@ -60,8 +62,7 @@ func run() error {
 		return err
 	}
 
-	// TODO(prompt-04): repository.New() instead of nil.
-	svc := service.New(nil, postgres.NewTxManager(pool), idempotency.NewStore(),
+	svc := service.New(repository.New(), postgres.NewTxManager(pool), idempotency.NewStore(),
 		outbox.NewWriter(cfg.ServiceName), service.SystemClock{}, service.UUIDv7{})
 
 	grpcSrv := grpcx.NewServer(cfg.GRPC.Addr, log)
@@ -82,7 +83,8 @@ func run() error {
 	a.Go(grpcSrv)
 	a.Go(admin)
 	a.Go(relay)
-	// TODO(prompt-05): a.Go(hold expirer worker), a.Go(idempotency + outbox cleanup worker).
+	a.Go(worker.NewHoldExpirer(svc))
+	a.Go(worker.NewJanitor(pool, cfg.Outbox.Retention))
 	a.OnShutdown("postgres", func(context.Context) error { pool.Close(); return nil })
 	a.OnShutdown("kafka", producer.Close)
 	return a.Run(ctx)
