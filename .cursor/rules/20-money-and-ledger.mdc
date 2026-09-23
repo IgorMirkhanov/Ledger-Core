@@ -1,0 +1,17 @@
+---
+description: Правила работы с деньгами и журналом. Применять к любому коду accounts/transfers/money.
+globs: ["internal/accounts/**", "internal/transfers/**", "internal/money/**", "internal/reconciler/**"]
+alwaysApply: false
+---
+
+# Деньги — критичные правила
+
+- `float32`/`float64` для денег ЗАПРЕЩЕНЫ. Суммы — `int64` минорных единиц или `money.Money`.
+- Арифметика над суммами — только через `internal/money` (проверка переполнения).
+- Любое изменение баланса — ТОЛЬКО через `domain.JournalEntry` с `Validate()` и проводками. Никогда `UPDATE accounts SET balance = balance + X` в обход журнала.
+- `postings` и `journal_entries` — append-only. Исправление — только новой записью kind=reversal.
+- Счета блокируются `LockAccounts` (FOR UPDATE, ORDER BY id) ДО чтения балансов для решения.
+- Idempotency: `Begin` — первым действием в транзакции, `Complete` — последним. Всё в одной транзакции с бизнес-изменениями и `outbox.Add`.
+- Событие в Kafka публикуется только через outbox. Прямой вызов producer'а из бизнес-кода запрещён.
+- В REST суммы — строки. В gRPC — int64.
+- Любой новый use case, меняющий деньги, требует теста на конкурентность (N горутин, проверка инварианта суммы).

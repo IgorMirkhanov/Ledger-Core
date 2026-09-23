@@ -1,0 +1,156 @@
+name: ledger-core
+
+x-go-service: &go-service
+  restart: unless-stopped
+  environment: &common-env
+    APP_ENV: local
+    LOG_LEVEL: info
+    ADMIN_ADDR: ":8081"
+    OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+    KAFKA_BROKERS: redpanda:9092
+
+services:
+  # ---------------------------------------------------------------- infrastructure
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+      POSTGRES_DB: postgres
+    command: ["postgres", "-c", "max_connections=300", "-c", "shared_buffers=256MB"]
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger"]
+      interval: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+
+  redpanda:
+    image: redpandadata/redpanda:v24.3.1
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 1G
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports: ["19092:19092"]
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true'"]
+      interval: 5s
+      retries: 30
+
+  redpanda-console:
+    image: redpandadata/console:v2.8.0
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports: ["8088:8080"]
+    depends_on:
+      redpanda: { condition: service_healthy }
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.0
+    command: ["--config=/etc/otel/collector.yml"]
+    volumes: ["./deploy/otel/collector.yml:/etc/otel/collector.yml:ro"]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.64.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16686:16686"]
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    volumes: ["./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+
+  # ---------------------------------------------------------------- services
+  accounts:
+    <<: *go-service
+    build: { context: ., args: { SERVICE: accounts } }
+    environment:
+      <<: *common-env
+      SERVICE_NAME: accounts
+      GRPC_ADDR: ":9090"
+      POSTGRES_DSN: postgres://ledger:ledger@postgres:5432/accounts?sslmode=disable
+    ports: ["9091:9090", "8091:8081"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redpanda: { condition: service_healthy }
+
+  transfers:
+    <<: *go-service
+    build: { context: ., args: { SERVICE: transfers } }
+    environment:
+      <<: *common-env
+      SERVICE_NAME: transfers
+      GRPC_ADDR: ":9090"
+      POSTGRES_DSN: postgres://ledger:ledger@postgres:5432/transfers?sslmode=disable
+      ACCOUNTS_GRPC_ADDR: accounts:9090
+    ports: ["9092:9090", "8092:8081"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redpanda: { condition: service_healthy }
+      accounts: { condition: service_started }
+
+  notifications:
+    <<: *go-service
+    build: { context: ., args: { SERVICE: notifications } }
+    environment:
+      <<: *common-env
+      SERVICE_NAME: notifications
+      POSTGRES_DSN: postgres://ledger:ledger@postgres:5432/notifications?sslmode=disable
+    ports: ["8093:8081"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redpanda: { condition: service_healthy }
+
+  gateway:
+    <<: *go-service
+    build: { context: ., args: { SERVICE: gateway } }
+    environment:
+      <<: *common-env
+      SERVICE_NAME: gateway
+      HTTP_ADDR: ":8080"
+      ACCOUNTS_GRPC_ADDR: accounts:9090
+      TRANSFERS_GRPC_ADDR: transfers:9090
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: local-dev-secret-change-me
+    ports: ["8080:8080", "8081:8081"]
+    depends_on:
+      redis: { condition: service_healthy }
+      accounts: { condition: service_started }
+      transfers: { condition: service_started }
+
+  reconciler:
+    build: { context: ., args: { SERVICE: reconciler } }
+    profiles: ["jobs"] # docker compose run --rm reconciler
+    environment:
+      SERVICE_NAME: reconciler
+      POSTGRES_DSN: postgres://reconciler:reconciler@postgres:5432/accounts?sslmode=disable
+      POSTGRES_MIGRATE_ON_START: "false"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+volumes:
+  pgdata:

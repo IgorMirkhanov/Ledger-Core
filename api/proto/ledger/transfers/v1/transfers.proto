@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package ledger.transfers.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/IgorMirkhanov/ledger-core/gen/ledger/transfers/v1;transfersv1";
+
+// TransfersService — оркестратор переводов (saga).
+//
+// CreateTransfer ТРЕБУЕТ metadata `idempotency-key` и `x-owner-id`.
+// Метод синхронно пытается довести перевод до терминального статуса в пределах deadline запроса.
+// Если не успел (транзиентная ошибка accounts), возвращает перевод в промежуточном статусе;
+// дальше его доведёт recovery worker. Клиент опрашивает GetTransfer.
+//
+// Ошибки: google.rpc.ErrorInfo{domain="ledger.transfers"}.
+//   INVALID_ARGUMENT     VALIDATION_FAILED, SAME_ACCOUNT, IDEMPOTENCY_KEY_REUSED, IDEMPOTENCY_KEY_MISSING
+//   FAILED_PRECONDITION  FX_RATE_NOT_FOUND
+//   NOT_FOUND            TRANSFER_NOT_FOUND
+// Бизнес-отказ самого перевода (нет денег и т.п.) — НЕ gRPC-ошибка, а status=FAILED + failure_code.
+service TransfersService {
+  rpc CreateTransfer(CreateTransferRequest) returns (CreateTransferResponse);
+  rpc GetTransfer(GetTransferRequest) returns (GetTransferResponse);
+  rpc ListTransfers(ListTransfersRequest) returns (ListTransfersResponse);
+}
+
+enum TransferStatus {
+  TRANSFER_STATUS_UNSPECIFIED = 0;
+  TRANSFER_STATUS_CREATED = 1;
+  TRANSFER_STATUS_FUNDS_HELD = 2;
+  TRANSFER_STATUS_COMPLETED = 3;
+  TRANSFER_STATUS_COMPENSATING = 4;
+  TRANSFER_STATUS_FAILED = 5;
+}
+
+message Transfer {
+  string id = 1;
+  string owner_id = 2;
+  string source_account_id = 3;
+  string dest_account_id = 4;
+  int64 amount = 5;
+  string currency = 6;
+  int64 dest_amount = 7;
+  string dest_currency = 8;
+  string fx_rate = 9; // десятичная строка, пусто если валюты совпадают
+  TransferStatus status = 10;
+  string failure_code = 11;   // INSUFFICIENT_FUNDS, ACCOUNT_NOT_ACTIVE, HOLD_EXPIRED, ...
+  string failure_reason = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp updated_at = 14;
+  google.protobuf.Timestamp completed_at = 15;
+}
+
+message CreateTransferRequest {
+  string source_account_id = 1;
+  string dest_account_id = 2;
+  int64 amount = 3;       // минорные единицы валюты source-счёта
+  string currency = 4;    // должна совпадать с валютой source-счёта
+  string dest_currency = 5; // валюта dest-счёта (для FX); пусто означает ту же валюту
+  string description = 6;
+}
+message CreateTransferResponse {
+  Transfer transfer = 1;
+}
+
+message GetTransferRequest {
+  string transfer_id = 1;
+}
+message GetTransferResponse {
+  Transfer transfer = 1;
+}
+
+message ListTransfersRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+message ListTransfersResponse {
+  repeated Transfer transfers = 1;
+  string next_page_token = 2;
+}

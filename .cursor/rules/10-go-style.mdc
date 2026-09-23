@@ -1,0 +1,19 @@
+---
+description: Стиль Go-кода
+globs: ["**/*.go"]
+alwaysApply: false
+---
+
+# Go style
+
+- Go 1.26, stdlib first. Логи — только `log/slog` (через `logger.FromContext(ctx)`), никаких fmt.Println/log.Printf.
+- `context.Context` — первый параметр каждой функции с I/O. Никаких `context.Background()` внутри бизнес-кода.
+- Ошибки: оборачивай с контекстом `fmt.Errorf("repo: lock accounts: %w", err)`. Сравнение — только `errors.Is/As`.
+- Доменные ошибки — sentinel-переменные из `internal/<svc>/domain/errors.go`. Не создавай ad-hoc строковые ошибки для бизнес-случаев.
+- Не паникуй в рантайм-коде. `panic` допустим только в `main`/init при невозможности старта.
+- Интерфейсы объявляются там, где используются (в `service/ports.go`), а не рядом с реализацией.
+- Конструкторы `New...` принимают зависимости явно; никаких глобальных синглтонов (кроме `slog.Default`).
+- Время — только через `Clock`, UUID — через `IDGenerator` (для детерминированных тестов). Новые ID — UUIDv7.
+- Горутины: всегда с понятным владельцем и способом остановки (ctx). Долгоживущие компоненты реализуют `app.Runner`.
+- Импорты группируются: stdlib / внешние / `github.com/IgorMirkhanov/ledger-core/...` (goimports local-prefixes).
+- Комментарии в коде — на английском, кратко, объясняют «почему», а не «что».

@@ -1,0 +1,185 @@
+syntax = "proto3";
+
+package ledger.accounts.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/IgorMirkhanov/ledger-core/gen/ledger/accounts/v1;accountsv1";
+
+// AccountsService — единственный владелец денег в системе.
+//
+// Идемпотентность: все мутирующие методы ТРЕБУЮТ gRPC metadata `idempotency-key`.
+// Повтор с тем же ключом и тем же телом возвращает сохранённый ответ.
+// Повтор с тем же ключом и другим телом возвращает INVALID_ARGUMENT (reason=IDEMPOTENCY_KEY_REUSED).
+//
+// Авторизация: metadata `x-owner-id` (проставляет gateway из JWT). Для клиентских методов
+// сервис проверяет, что счёт принадлежит owner. Внутренние методы (холды) вызывает только transfers
+// (metadata `x-caller=transfers`).
+//
+// Ошибки: google.rpc.Status + google.rpc.ErrorInfo{reason, domain="ledger.accounts"}.
+//   NOT_FOUND            ACCOUNT_NOT_FOUND, HOLD_NOT_FOUND
+//   FAILED_PRECONDITION  INSUFFICIENT_FUNDS, ACCOUNT_NOT_ACTIVE, HOLD_NOT_ACTIVE, HOLD_EXPIRED,
+//                        CURRENCY_MISMATCH
+//   INVALID_ARGUMENT     VALIDATION_FAILED, IDEMPOTENCY_KEY_REUSED, IDEMPOTENCY_KEY_MISSING
+//   PERMISSION_DENIED    NOT_ACCOUNT_OWNER
+service AccountsService {
+  rpc CreateAccount(CreateAccountRequest) returns (CreateAccountResponse);
+  rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
+  rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
+  rpc GetStatement(GetStatementRequest) returns (GetStatementResponse);
+
+  // Эмуляция внешнего мира: деньги приходят/уходят через системный счёт settlement.<CUR>.
+  rpc Deposit(DepositRequest) returns (DepositResponse);
+  rpc Withdraw(WithdrawRequest) returns (WithdrawResponse);
+
+  // Внутренние методы для saga переводов.
+  rpc CreateHold(CreateHoldRequest) returns (CreateHoldResponse);
+  rpc CaptureHold(CaptureHoldRequest) returns (CaptureHoldResponse);
+  rpc ReleaseHold(ReleaseHoldRequest) returns (ReleaseHoldResponse);
+}
+
+// Сумма в минорных единицах. Никаких float.
+message Money {
+  int64 amount = 1;   // минорные единицы, для запросов строго > 0
+  string currency = 2; // ISO 4217
+}
+
+enum AccountStatus {
+  ACCOUNT_STATUS_UNSPECIFIED = 0;
+  ACCOUNT_STATUS_ACTIVE = 1;
+  ACCOUNT_STATUS_FROZEN = 2;
+  ACCOUNT_STATUS_CLOSED = 3;
+}
+
+message Account {
+  string id = 1;
+  string owner_id = 2;
+  string currency = 3;
+  AccountStatus status = 4;
+  int64 balance = 5;   // сумма проводок
+  int64 held = 6;      // сумма активных холдов
+  int64 available = 7; // balance - held
+  int64 version = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+enum HoldStatus {
+  HOLD_STATUS_UNSPECIFIED = 0;
+  HOLD_STATUS_ACTIVE = 1;
+  HOLD_STATUS_CAPTURED = 2;
+  HOLD_STATUS_RELEASED = 3;
+  HOLD_STATUS_EXPIRED = 4;
+}
+
+message Hold {
+  string id = 1;
+  string account_id = 2;
+  Money amount = 3;
+  HoldStatus status = 4;
+  string reference_id = 5;
+  google.protobuf.Timestamp expires_at = 6;
+  string journal_entry_id = 7; // заполнен для CAPTURED
+}
+
+enum EntryKind {
+  ENTRY_KIND_UNSPECIFIED = 0;
+  ENTRY_KIND_DEPOSIT = 1;
+  ENTRY_KIND_WITHDRAWAL = 2;
+  ENTRY_KIND_TRANSFER = 3;
+  ENTRY_KIND_REVERSAL = 4;
+}
+
+message StatementLine {
+  int64 posting_id = 1;
+  string entry_id = 2;
+  EntryKind kind = 3;
+  int64 amount = 4; // со знаком
+  int64 balance_after = 5;
+  string description = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+message CreateAccountRequest {
+  string currency = 1;
+}
+message CreateAccountResponse {
+  Account account = 1;
+}
+
+message GetAccountRequest {
+  string account_id = 1;
+}
+message GetAccountResponse {
+  Account account = 1;
+}
+
+message ListAccountsRequest {}
+message ListAccountsResponse {
+  repeated Account accounts = 1;
+}
+
+message GetStatementRequest {
+  string account_id = 1;
+  int32 page_size = 2;    // 1..200, по умолчанию 50
+  string page_token = 3;  // непрозрачный курсор (keyset по posting_id)
+  google.protobuf.Timestamp from = 4;
+  google.protobuf.Timestamp to = 5;
+}
+message GetStatementResponse {
+  repeated StatementLine lines = 1;
+  string next_page_token = 2;
+}
+
+message DepositRequest {
+  string account_id = 1;
+  Money amount = 2;
+  string external_ref = 3; // идентификатор во «внешней системе», для аудита
+}
+message DepositResponse {
+  string journal_entry_id = 1;
+  Account account = 2;
+}
+
+message WithdrawRequest {
+  string account_id = 1;
+  Money amount = 2;
+  string external_ref = 3;
+}
+message WithdrawResponse {
+  string journal_entry_id = 1;
+  Account account = 2;
+}
+
+message CreateHoldRequest {
+  string account_id = 1;
+  Money amount = 2;
+  string reference_id = 3;             // например transfer_id; уникален в рамках счёта
+  google.protobuf.Duration ttl = 4;    // по умолчанию 15m, максимум 7d
+}
+message CreateHoldResponse {
+  Hold hold = 1;
+}
+
+// Capture закрывает холд и атомарно проводит деньги на dest_account.
+// Если валюта dest отличается — accounts пишет FX-ноги через fx.<CUR>.
+message CaptureHoldRequest {
+  string hold_id = 1;
+  string dest_account_id = 2;
+  Money dest_amount = 3;    // рассчитывает transfers (курс зафиксирован там)
+  string description = 4;
+  string reference_id = 5;  // transfer_id, идёт в journal_entries.reference_id
+}
+message CaptureHoldResponse {
+  Hold hold = 1;
+  string journal_entry_id = 2;
+}
+
+message ReleaseHoldRequest {
+  string hold_id = 1;
+  string reason = 2;
+}
+message ReleaseHoldResponse {
+  Hold hold = 1;
+}

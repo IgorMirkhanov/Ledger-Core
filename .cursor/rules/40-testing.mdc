@@ -1,0 +1,15 @@
+---
+description: Правила тестирования
+globs: ["**/*_test.go", "tests/**"]
+alwaysApply: false
+---
+
+# Тесты
+
+- Unit: `internal/**`, без сети и БД, table-driven, `t.Parallel()` где безопасно. Запуск `make test` (с `-race`).
+- Интеграционные: `tests/integration/**`, build tag `//go:build integration`, testcontainers-go (Postgres 17, Redpanda). Запуск `make test-integration`.
+- Используй `github.com/stretchr/testify/require` для проверок.
+- Фейки для портов пиши вручную в `*_test.go` или `internal/<svc>/service/fakes_test.go` (без mockgen), если не сказано иное.
+- Время в тестах — фейковый `Clock`, никаких `time.Sleep` для синхронизации (используй `require.Eventually`).
+- Каждый баг-фикс сопровождается тестом, который падал до фикса.
+- Обязательные сценарии перечислены в `docs/saga.md` и в промптах; тест-имена отражают сценарий: `TestTransfer_InsufficientFunds_Fails`.

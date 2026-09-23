@@ -1,0 +1,7 @@
+.git
+.github
+docs
+tests/load
+**/*_test.go
+bin
+coverage.out
