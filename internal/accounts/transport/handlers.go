@@ -51,9 +51,9 @@ func (h *Handler) GetAccount(ctx context.Context, req *accountsv1.GetAccountRequ
 	if err != nil {
 		return nil, statusErr(err)
 	}
-	owner, err := grpcx.OwnerID(ctx)
+	owner, err := accountOwner(ctx)
 	if err != nil {
-		return nil, err
+		return nil, statusErr(err)
 	}
 	acc, err := h.svc.GetAccount(ctx, owner, id)
 	if err != nil {
@@ -302,6 +302,15 @@ func (h *Handler) prepare(ctx context.Context, req proto.Message, internal bool)
 	out.ctx, out.replayed = idempotency.WithReplayTracker(ctx)
 	out.idem = service.Idem{Key: idempotency.Namespace(principal, key), RequestHash: sum}
 	return out, nil
+}
+
+// accountOwner lets transfers read a foreign dest account (no x-owner-id → uuid.Nil, CheckOwner skipped).
+// A customer call still requires x-owner-id.
+func accountOwner(ctx context.Context) (uuid.UUID, error) {
+	if grpcx.Caller(ctx) == "transfers" {
+		return transfersOwner(ctx)
+	}
+	return grpcx.OwnerID(ctx)
 }
 
 func transfersOwner(ctx context.Context) (uuid.UUID, error) {
