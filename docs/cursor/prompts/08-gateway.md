@@ -19,7 +19,19 @@
 ## Handlers
 Все эндпоинты из `docs/api.md`. Для каждого: decode (DisallowUnknownFields) → валидация → gRPC-вызов с metadata
 (`x-owner-id`, `idempotency-key`, `x-request-id`), deadline `UPSTREAM_TIMEOUT` → encode.
-- Суммы в JSON — строки (`json:",string"` на int64 или отдельные DTO).
+
+**Безопасность metadata (критично).** Accounts считает вызов внутренним, если есть `x-caller: transfers`
+и нет `x-owner-id` (ADR-0008, промпт 05). Поэтому:
+- исходящий gRPC-контекст gateway собирает **с нуля**: `metadata.NewOutgoingContext(ctx, metadata.Pairs(...))`
+  только с перечисленными ключами. Никогда не пробрасывай HTTP-заголовки клиента в metadata и не используй
+  `metadata.AppendToOutgoingContext` поверх чужого контекста;
+- `x-owner-id` берётся **только** из проверенного JWT и передаётся в **каждом** вызове, включая GET;
+- тест: запрос с заголовками `X-Caller: transfers`, `X-Owner-Id: <чужой uuid>`, `Idempotency-Key` →
+  фейковый gRPC-сервер получает `x-owner-id` из JWT и не получает `x-caller`.
+
+**Суммы.** В JSON суммы передаются строками. Разбор строгий: регэксп `^[1-9][0-9]{0,18}$`, затем `strconv.ParseInt(s, 10, 64)`.
+Отклоняй `"0"`, `"-5"`, `"+5"`, `"1.5"`, `"1e3"`, `" 5"`, числа JSON без кавычек и значения больше int64 → 400 `VALIDATION_FAILED`.
+Table-driven тест на все эти случаи. В ответах суммы — `strconv.FormatInt`.
 - Ошибки: `grpcToProblem(err)` по таблице маппинга в docs/api.md, `type` = `https://ledger-core.dev/errors/<kebab-code>`.
 - Replay: accounts/transfers уже выставляют gRPC header `idempotent-replayed: true` (промпты 05–07).
   Gateway читает его через `grpc.Header(&md)` и ставит HTTP-заголовок `Idempotent-Replayed: true`.

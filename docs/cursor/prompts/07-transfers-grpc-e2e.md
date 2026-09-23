@@ -13,7 +13,8 @@
 - Перевод RUB→RUB: completed, балансы, 2 проводки, события в обоих outbox.
 - Перевод USD→RUB по курсу 90: 4 проводки, G2 (сумма балансов по каждой валюте = 0).
 - Недостаточно средств → failed, холдов нет.
-- Dest заморожен (UPDATE accounts SET status='frozen' в тесте) → failed/ACCOUNT_NOT_ACTIVE, source восстановлен.
+- Dest закрыт (UPDATE accounts SET status='closed' в тесте) → failed/ACCOUNT_NOT_ACTIVE, source восстановлен.
+- Dest заморожен → completed; source заморожен → failed/ACCOUNT_NOT_ACTIVE на шаге hold (ADR-0009).
 - **Chaos-in-process**: обёртка над accounts-клиентом, которая на capture выполняет вызов, но возвращает `Unavailable`
   (ответ «потерялся»). Recovery worker доводит → completed, ровно 1 journal entry.
 - 200 параллельных переводов между 20 счетами (A→B и B→A вперемешку) → все терминальные, сумма сохранена.

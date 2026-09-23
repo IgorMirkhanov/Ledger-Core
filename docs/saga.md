@@ -100,7 +100,8 @@ hold expirer в accounts вернёт деньги. Capture истёкшего �
 1. Happy path, одна валюта.
 2. Happy path, FX (USD → RUB), проверка 4 проводок и G2.
 3. Недостаточно средств → `failed/INSUFFICIENT_FUNDS`, холда нет.
-4. Dest заморожен → `compensating` → `failed/ACCOUNT_NOT_ACTIVE`, холд `released`, баланс source восстановлен.
+4. Dest закрыт (`closed`) → `compensating` → `failed/ACCOUNT_NOT_ACTIVE`, холд `released`, баланс source восстановлен.
+   Dest заморожен (`frozen`) → `completed`: заморозка запрещает только списание (ADR-0009).
 5. accounts возвращает `UNAVAILABLE` на capture 3 раза, потом OK → `completed`, `attempts=3`.
 6. Таймаут capture, но accounts на самом деле выполнил capture → повтор с тем же ключом → `completed`, одна журнальная запись.
 7. Двойной `CreateTransfer` с одним ключом параллельно → один перевод.

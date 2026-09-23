@@ -86,6 +86,7 @@ func (a *Account) CanDebit(amount int64) error {
 }
 
 // CanCredit reports whether money can be put on the account.
+// A frozen account still accepts credits; only debits are blocked (docs/adr/0009).
 func (a *Account) CanCredit() error {
 	if a.Status == StatusClosed {
 		return ErrAccountNotActive

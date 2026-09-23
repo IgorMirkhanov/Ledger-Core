@@ -48,6 +48,7 @@ domain-слой). Cursor реализует механику по пошагов
 | 05 | accounts-service-grpc | 04 | **рабочий ledger** + тест конкурентности |
 | 06 | transfers-saga | 05 | saga + recovery |
 | 07 | transfers-grpc-e2e | 06 | e2e переводы |
+| 07a | freeze-semantics | 07 | исправление по ревью: одно правило заморозки (ADR-0009) |
 | 08 | gateway | 05, 07 | публичный REST, `make up` + demo |
 | 09 | notifications | 02, 05 | уведомления |
 | 10 | reconciler | 05 | сверка |
