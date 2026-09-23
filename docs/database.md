@@ -107,8 +107,8 @@ FOR UPDATE SKIP LOCKED;
 3. `LockAccounts([account, settlement])`.
 4. Проверки: владелец, валюта, `CanCredit`.
 5. Построить `JournalEntry{kind=deposit, reference_type="deposit", reference_id=key}`,
-   postings `settlement −X`, `account +X`; `Validate()`.
-6. Для каждой проводки `BalanceAfter = acc.Apply(amount)`.
+   postings `settlement −X`, `account +X`.
+6. `entry.Apply(locked, now)`: валидирует G1, атомарно меняет балансы заблокированных счетов, заполняет `BalanceAfter`.
 7. `InsertEntry`, `UpdateBalances`, `outbox.Add(account.credited)`.
 8. `idem.Complete(response)`.
 
@@ -124,7 +124,7 @@ FOR UPDATE SKIP LOCKED;
 2. `LockHold(hold)` (FOR UPDATE). Проверить `status=active`, не истёк.
 3. Определить участников: `src = hold.account`, `dst`, при разных валютах `fx.<srcCur>`, `fx.<dstCur>`.
 4. `LockAccounts(все участники)` (по id).
-5. `src.Unreserve(hold.amount)`, затем `TransferPostings(...)`, `Validate()`, `Apply` каждой проводки.
+5. `src.Unreserve(hold.amount)`, затем `TransferPostings(...)` → `entry.Apply(locked, now)`.
    Порядок важен: сначала снять резерв, потом списать, иначе ложный `INSUFFICIENT_FUNDS`.
 6. `hold.Capture(entryID)`, `UpdateHold`, `InsertEntry`, `UpdateBalances`.
 7. outbox: `hold.captured`, `account.debited` (src), `account.credited` (dst).

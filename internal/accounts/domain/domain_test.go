@@ -113,3 +113,55 @@ func TestHoldLifecycle(t *testing.T) {
 		t.Fatalf("second release must be a no-op: %v, %v", changed, err)
 	}
 }
+
+func TestJournalEntryApply(t *testing.T) {
+	src := NewCustomerAccount(uuid.New(), uuid.New(), rub, now)
+	src.Balance = 100
+	dst := NewCustomerAccount(uuid.New(), uuid.New(), rub, now)
+	accs := map[uuid.UUID]*Account{src.ID: src, dst.ID: dst}
+
+	e := &JournalEntry{Postings: TransferPostings(src.ID, dst.ID, money.New(100, rub), money.New(100, rub), uuid.Nil, uuid.Nil)}
+	if err := e.Apply(accs, now); err != nil {
+		t.Fatal(err)
+	}
+	if !e.IsApplied() || src.Balance != 0 || dst.Balance != 100 {
+		t.Fatalf("applied=%v src=%d dst=%d", e.IsApplied(), src.Balance, dst.Balance)
+	}
+	if e.Postings[0].BalanceAfter != 0 || e.Postings[1].BalanceAfter != 100 {
+		t.Fatalf("balance_after = %d, %d", e.Postings[0].BalanceAfter, e.Postings[1].BalanceAfter)
+	}
+	if err := e.Apply(accs, now); err == nil {
+		t.Fatal("second Apply must fail")
+	}
+}
+
+func TestJournalEntryApplyIsAtomic(t *testing.T) {
+	a := NewCustomerAccount(uuid.New(), uuid.New(), rub, now)
+	a.Balance = 50
+	b := NewCustomerAccount(uuid.New(), uuid.New(), rub, now)
+	c := NewCustomerAccount(uuid.New(), uuid.New(), rub, now)
+	accs := map[uuid.UUID]*Account{a.ID: a, b.ID: b, c.ID: c}
+
+	// b is credited first, then c is debited below zero → whole entry must fail, b untouched.
+	e := &JournalEntry{Postings: []Posting{
+		{AccountID: b.ID, Amount: 10, Currency: rub},
+		{AccountID: a.ID, Amount: -5, Currency: rub},
+		{AccountID: c.ID, Amount: -5, Currency: rub},
+	}}
+	if err := e.Apply(accs, now); !errors.Is(err, ErrInsufficientFunds) {
+		t.Fatalf("err = %v", err)
+	}
+	if e.IsApplied() || a.Balance != 50 || b.Balance != 0 || c.Balance != 0 || a.Version != 0 || b.Version != 0 {
+		t.Fatalf("accounts modified on failure: a=%d b=%d c=%d", a.Balance, b.Balance, c.Balance)
+	}
+}
+
+func TestJournalEntryApplyRejectsFrozenDebit(t *testing.T) {
+	a := NewCustomerAccount(uuid.New(), uuid.New(), rub, now)
+	a.Balance, a.Status = 100, StatusFrozen
+	b := NewCustomerAccount(uuid.New(), uuid.New(), rub, now)
+	e := &JournalEntry{Postings: TransferPostings(a.ID, b.ID, money.New(10, rub), money.New(10, rub), uuid.Nil, uuid.Nil)}
+	if err := e.Apply(map[uuid.UUID]*Account{a.ID: a, b.ID: b}, now); !errors.Is(err, ErrAccountNotActive) {
+		t.Fatalf("err = %v", err)
+	}
+}

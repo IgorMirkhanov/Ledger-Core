@@ -18,8 +18,9 @@
   - unique `journal_entries_reference_uniq` → `service.ErrEntryReferenceExists`.
 - Маппинг типов: `money.Currency` ↔ `CHAR(3)` через `money.ParseCurrency`; enum-ы Postgres ↔ string-типы домена;
   `uuid.Nil` ↔ NULL для `owner_id`, `code`, `journal_entry_id`.
-- `InsertEntry`: вставить `journal_entries`, затем все postings одним запросом. Возвращать ошибку, если у posting не заполнен `BalanceAfter`
-  (защита от забытого Apply: добавь в domain.Posting флаг или проверяй через отдельное поле `applied bool`, на твоё усмотрение, но с тестом).
+- `InsertEntry`: если `!e.IsApplied()` → вернуть `domain.ErrEntryNotApplied` (защита от сохранения записи без `JournalEntry.Apply`;
+  `BalanceAfter = 0` — законное значение, поэтому проверять по нему нельзя). Затем вставить `journal_entries` и все postings одним запросом.
+  Тест: неприменённая запись → `ErrEntryNotApplied`, в БД ничего не записано.
 - `GetSystemAccount(prefix, cur)` — по `code = prefix || '.' || cur`. Кэшировать id системных счетов в памяти
   (они неизменны) — через `sync.Map` внутри Repository допустимо.
 

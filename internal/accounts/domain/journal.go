@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -23,7 +24,7 @@ type Posting struct {
 	AccountID    uuid.UUID
 	Amount       int64 // + increases account balance, − decreases
 	Currency     money.Currency
-	BalanceAfter int64 // filled by the service after applying to the account
+	BalanceAfter int64 // set by JournalEntry.Apply; 0 is a legitimate value
 }
 
 // JournalEntry is one business operation consisting of balanced postings.
@@ -35,7 +36,63 @@ type JournalEntry struct {
 	Description   string
 	Postings      []Posting
 	CreatedAt     time.Time
+
+	applied bool
 }
+
+// ErrEntryNotApplied is returned by persistence when an entry is saved before Apply.
+var ErrEntryNotApplied = errors.New("ENTRY_NOT_APPLIED") // programming error
+
+// Apply validates the entry and applies every posting to its (already locked) account in order,
+// setting BalanceAfter. It is all-or-nothing: on error no account is modified.
+// Holds must be unreserved BEFORE Apply (see CaptureHold in docs/database.md).
+func (e *JournalEntry) Apply(accounts map[uuid.UUID]*Account, now time.Time) error {
+	if e.applied {
+		return fmt.Errorf("%w: entry already applied", ErrUnbalancedEntry)
+	}
+	if err := e.Validate(); err != nil {
+		return err
+	}
+	// Dry run on copies so a failure in the middle leaves accounts untouched.
+	scratch := make(map[uuid.UUID]Account, len(accounts))
+	for i, p := range e.Postings {
+		acc, ok := accounts[p.AccountID]
+		if !ok {
+			return fmt.Errorf("%w: account %s is not locked for posting %d", ErrAccountNotFound, p.AccountID, i)
+		}
+		if acc.Currency.Code != p.Currency.Code {
+			return ErrCurrencyMismatch
+		}
+		if p.Amount > 0 {
+			if err := acc.CanCredit(); err != nil {
+				return err
+			}
+		} else if acc.Status != StatusActive {
+			return ErrAccountNotActive
+		}
+		if _, seen := scratch[p.AccountID]; !seen {
+			scratch[p.AccountID] = *acc
+		}
+		c := scratch[p.AccountID]
+		if _, err := c.Apply(p.Amount, now); err != nil {
+			return err
+		}
+		scratch[p.AccountID] = c
+	}
+	for i := range e.Postings {
+		p := &e.Postings[i]
+		bal, err := accounts[p.AccountID].Apply(p.Amount, now)
+		if err != nil {
+			return err // unreachable: dry run succeeded
+		}
+		p.BalanceAfter = bal
+	}
+	e.applied = true
+	return nil
+}
+
+// IsApplied reports whether Apply succeeded. Repositories must refuse to persist unapplied entries.
+func (e *JournalEntry) IsApplied() bool { return e.applied }
 
 // Validate enforces the double-entry invariant (G1):
 // at least two postings, no zero amounts, and per-currency sum equal to zero.
