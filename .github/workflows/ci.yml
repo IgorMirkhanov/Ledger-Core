@@ -44,7 +44,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, openapi]
     strategy:
       matrix:
         service: [gateway, accounts, transfers, notifications, reconciler]
@@ -58,3 +58,12 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  openapi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Lint OpenAPI
+        run: npx --yes @redocly/cli@1 lint api/openapi.yaml

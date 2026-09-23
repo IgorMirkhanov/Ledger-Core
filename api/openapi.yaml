@@ -1,0 +1,155 @@
+openapi: 3.1.0
+info:
+  title: Ledger Core API
+  version: 0.1.0
+  description: Public REST API of the Ledger Core gateway.
+servers:
+  - url: http://localhost:8080/v1
+security:
+  - bearerAuth: []
+paths:
+  /dev/token:
+    post:
+      security: []
+      summary: Issue a local JWT (APP_ENV=local only)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Token issued
+  /accounts:
+    post:
+      summary: Create account
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currency]
+              properties:
+                currency: { type: string, example: RUB }
+      responses:
+        "201": { description: Created }
+    get:
+      summary: List accounts
+      responses:
+        "200": { description: OK }
+  /accounts/{id}:
+    get:
+      summary: Get account
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+      responses:
+        "200": { description: OK }
+  /accounts/{id}/statement:
+    get:
+      summary: Account statement
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200": { description: OK }
+  /accounts/{id}/deposits:
+    post:
+      summary: Deposit
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CashRequest"
+      responses:
+        "201": { description: Created }
+  /accounts/{id}/withdrawals:
+    post:
+      summary: Withdraw
+      parameters:
+        - $ref: "#/components/parameters/AccountId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CashRequest"
+      responses:
+        "201": { description: Created }
+  /transfers:
+    post:
+      summary: Create transfer
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_account_id, dest_account_id, amount, currency]
+              properties:
+                source_account_id: { type: string, format: uuid }
+                dest_account_id: { type: string, format: uuid }
+                amount: { type: string, pattern: "^[1-9][0-9]{0,18}$", description: Minor units as a decimal string }
+                currency: { type: string }
+                dest_currency: { type: string }
+                description: { type: string }
+      responses:
+        "201": { description: Terminal status }
+        "202": { description: In progress }
+    get:
+      summary: List transfers
+      parameters:
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /transfers/{id}:
+    get:
+      summary: Get transfer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: OK }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    AccountId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    CashRequest:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: string, pattern: "^[1-9][0-9]{0,18}$" }
+        currency: { type: string }
+        external_ref: { type: string }
