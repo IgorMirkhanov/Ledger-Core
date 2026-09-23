@@ -46,6 +46,10 @@
   `ClaimPending(now)` → перевод не возвращается. После разблокировки перевод доходит до `completed`, `CreateHold` вызван ровно 1 раз.
 - Существующие 10 сценариев саги и e2e должны остаться зелёными.
 
+## Заодно
+`.golangci.yml` теперь проверяет и файлы с тегом `integration`. Исправь 3 замечания в `tests/integration`
+(goimports в `e2e_transfers_test.go`, prealloc в `accounts_grpc_test.go` и `transfers_repository_test.go`).
+
 ## Критерии приёмки
 `make test && make test-integration && make lint` зелёные.
 Коммиты: `fix(workers): never exit on iteration errors`, `fix(transfers): lease in-flight saga steps`.
