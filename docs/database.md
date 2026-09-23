@@ -149,16 +149,24 @@ FOR UPDATE SKIP LOCKED;
 | `fx_rates` | Курсы. Курс фиксируется в переводе при создании |
 | `idempotency_keys`, `outbox` | Как в accounts |
 
-**Recovery worker (несколько реплик):**
+**Recovery worker (несколько реплик): захват с арендой (lease):**
 ```sql
-SELECT id FROM transfers
-WHERE status IN ('created', 'funds_held', 'compensating')
-  AND next_attempt_at <= $1
-ORDER BY next_attempt_at
-LIMIT $2
-FOR UPDATE SKIP LOCKED;
+UPDATE transfers SET next_attempt_at = $2          -- $2 = now + stepLease (10s)
+WHERE id IN (
+    SELECT id FROM transfers
+    WHERE status IN ('created', 'funds_held', 'compensating')
+      AND next_attempt_at <= $1
+    ORDER BY next_attempt_at
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED)
+RETURNING id;
 ```
-Далее для каждого id вызывается `Advance(id)` (в своей транзакции/вызове).
+Далее для каждого id вызывается `Advance(id)`.
+
+> `SKIP LOCKED` защищает только до COMMIT захватывающей транзакции. Без аренды перевод остаётся «к исполнению»
+> и после коммита: его тут же заберёт другая реплика или он пересечётся с API, который его уже продвигает.
+> Аренда (`next_attempt_at` в будущем) не меняет `version`: это не состояние саги, а отметка «занято до».
+> Если исполнитель упал, аренда истекает и перевод подбирает другой.
 
 **Оптимистичное обновление:**
 ```sql
