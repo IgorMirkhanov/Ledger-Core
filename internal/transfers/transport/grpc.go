@@ -31,3 +31,5 @@ type Handler struct {
 }
 
 func NewHandler(svc *service.Service) *Handler { return &Handler{svc: svc} }
+
+var _ transfersv1.TransfersServiceServer = (*Handler)(nil)

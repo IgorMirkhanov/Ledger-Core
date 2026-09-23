@@ -43,8 +43,15 @@ func (s *Service) CreateTransfer(ctx context.Context, cmd CreateTransferCmd) (*d
 	if err != nil {
 		return nil, err
 	}
-	if src.Currency.Code != cmd.Amount.Currency().Code || dst.Currency.Code != cmd.DestCurrency.Code {
+	if src.Currency.Code != cmd.Amount.Currency().Code {
 		return nil, fmt.Errorf("%w: account currency does not match the request", domain.ErrValidation)
+	}
+	destCur := dst.Currency
+	if cmd.DestCurrency.Code != "" {
+		if cmd.DestCurrency.Code != dst.Currency.Code {
+			return nil, fmt.Errorf("%w: dest currency does not match the account", domain.ErrValidation)
+		}
+		destCur = cmd.DestCurrency
 	}
 
 	var created *domain.Transfer
@@ -69,7 +76,7 @@ func (s *Service) CreateTransfer(ctx context.Context, cmd CreateTransferCmd) (*d
 		if err != nil {
 			return err
 		}
-		tr, err := domain.NewTransfer(uuid.Must(uuid.NewV7()), cmd.OwnerID, cmd.SourceID, cmd.DestID, cmd.Amount, dst.Currency, rate, now)
+		tr, err := domain.NewTransfer(uuid.Must(uuid.NewV7()), cmd.OwnerID, cmd.SourceID, cmd.DestID, cmd.Amount, destCur, rate, now)
 		if err != nil {
 			return err
 		}

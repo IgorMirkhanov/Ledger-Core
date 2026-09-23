@@ -222,6 +222,22 @@ func TestGetTransfer_HidesForeignOwner(t *testing.T) {
 	require.Equal(t, tr.ID, got.ID)
 }
 
+func TestSaga_EmptyDestCurrencyUsesAccount(t *testing.T) {
+	rig := newRig(t, false)
+	cmd := rig.cmd("empty-dest")
+	cmd.DestCurrency = money.Currency{}
+	tr, err := rig.svc.CreateTransfer(context.Background(), cmd)
+	require.NoError(t, err)
+	require.Equal(t, "USD", tr.DestAmount.Currency().Code)
+	require.Nil(t, tr.FXRate)
+
+	cmd = rig.cmd("bad-dest")
+	cmd.IdemKey = "2"
+	cmd.DestCurrency = rig.rub
+	_, err = rig.svc.CreateTransfer(context.Background(), cmd)
+	require.ErrorIs(t, err, domain.ErrValidation)
+}
+
 type rig struct {
 	svc      *Service
 	repo     *memRepo
