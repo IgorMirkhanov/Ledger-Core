@@ -20,7 +20,7 @@ func TestDeposit_ReplayDoesNotTouchRepositoryAgain(t *testing.T) {
 	customer := domain.NewCustomerAccount(uuid.Must(uuid.NewV7()), owner, usd, time.Unix(0, 0).UTC())
 	settlement := &domain.Account{
 		ID: uuid.Must(uuid.NewV7()), Kind: domain.KindSystem, Code: "settlement.USD",
-		Currency: usd, Status: domain.StatusActive, AllowOverdraft: true,
+		Currency: usd, Status: domain.AccountStatus("active"), AllowOverdraft: true,
 	}
 	repo.putAccount(customer)
 	repo.putAccount(settlement)
@@ -56,7 +56,7 @@ func TestWithdraw_BusinessErrorDoesNotComplete(t *testing.T) {
 	customer.Balance = 100
 	settlement := &domain.Account{
 		ID: uuid.Must(uuid.NewV7()), Kind: domain.KindSystem, Code: "settlement.USD",
-		Currency: usd, Status: domain.StatusActive, AllowOverdraft: true,
+		Currency: usd, Status: domain.AccountStatus("active"), AllowOverdraft: true,
 	}
 	repo.putAccount(customer)
 	repo.putAccount(settlement)
@@ -86,11 +86,11 @@ func TestCaptureHold_FXBuildsFourPostings(t *testing.T) {
 	dst := domain.NewCustomerAccount(uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), eur, time.Unix(0, 0).UTC())
 	fxUSD := &domain.Account{
 		ID: uuid.Must(uuid.NewV7()), Kind: domain.KindSystem, Code: "fx.USD",
-		Currency: usd, Status: domain.StatusActive, AllowOverdraft: true,
+		Currency: usd, Status: domain.AccountStatus("active"), AllowOverdraft: true,
 	}
 	fxEUR := &domain.Account{
 		ID: uuid.Must(uuid.NewV7()), Kind: domain.KindSystem, Code: "fx.EUR",
-		Currency: eur, Status: domain.StatusActive, AllowOverdraft: true,
+		Currency: eur, Status: domain.AccountStatus("active"), AllowOverdraft: true,
 	}
 	repo.putAccount(src)
 	repo.putAccount(dst)

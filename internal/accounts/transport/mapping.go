@@ -91,12 +91,12 @@ func accountPB(a *domain.Account) *accountsv1.Account {
 }
 
 func statusPB(s domain.AccountStatus) accountsv1.AccountStatus {
-	switch s {
-	case domain.StatusActive:
+	switch string(s) {
+	case "active":
 		return accountsv1.AccountStatus_ACCOUNT_STATUS_ACTIVE
-	case domain.StatusFrozen:
+	case "frozen":
 		return accountsv1.AccountStatus_ACCOUNT_STATUS_FROZEN
-	case domain.StatusClosed:
+	case "closed":
 		return accountsv1.AccountStatus_ACCOUNT_STATUS_CLOSED
 	default:
 		return accountsv1.AccountStatus_ACCOUNT_STATUS_UNSPECIFIED

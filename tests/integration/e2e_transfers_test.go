@@ -87,7 +87,26 @@ func TestE2E_InsufficientFunds(t *testing.T) {
 	require.Equal(t, int64(0), accountBalance(t, ctx, st.accountsPool, src.ID))
 }
 
-func TestE2E_FrozenDestCompensates(t *testing.T) {
+func TestE2E_ClosedDestCompensates(t *testing.T) {
+	ctx := testContext(t)
+	st := startTransferStack(t)
+	rub := mustCurrency(t, "RUB")
+	owner := uuid.Must(uuid.NewV7())
+	src := fundAccount(t, ctx, st.accounts, owner, rub, 1_000)
+	dst := openAccount(t, ctx, st.accounts, owner, rub)
+	_, err := st.accountsPool.Exec(ctx, `UPDATE accounts SET status = 'closed' WHERE id = $1`, dst.ID)
+	require.NoError(t, err)
+
+	tr := mustTransfer(t, ctx, st.transfers, owner, src.ID, dst.ID, money.New(400, rub), rub)
+	require.Equal(t, transferdomain.StatusFailed, tr.Status)
+	require.Equal(t, transferdomain.FailureAccountNotActive, tr.FailureCode)
+	require.Equal(t, int64(1_000), accountBalance(t, ctx, st.accountsPool, src.ID))
+	require.Equal(t, int64(0), accountBalance(t, ctx, st.accountsPool, dst.ID))
+	require.Equal(t, int64(0), holdsByStatus(t, ctx, st.accountsPool, "active"))
+	require.Equal(t, int64(1), holdsByStatus(t, ctx, st.accountsPool, "released"))
+}
+
+func TestE2E_FrozenDestCompletes(t *testing.T) {
 	ctx := testContext(t)
 	st := startTransferStack(t)
 	rub := mustCurrency(t, "RUB")
@@ -98,12 +117,32 @@ func TestE2E_FrozenDestCompensates(t *testing.T) {
 	require.NoError(t, err)
 
 	tr := mustTransfer(t, ctx, st.transfers, owner, src.ID, dst.ID, money.New(400, rub), rub)
+	require.Equal(t, transferdomain.StatusCompleted, tr.Status)
+	require.Equal(t, int64(600), accountBalance(t, ctx, st.accountsPool, src.ID))
+	require.Equal(t, int64(400), accountBalance(t, ctx, st.accountsPool, dst.ID))
+}
+
+func TestE2E_FrozenSourceRejectedAtHold(t *testing.T) {
+	ctx := testContext(t)
+	st := startTransferStack(t)
+	rub := mustCurrency(t, "RUB")
+	owner := uuid.Must(uuid.NewV7())
+	src := fundAccount(t, ctx, st.accounts, owner, rub, 1_000)
+	dst := openAccount(t, ctx, st.accounts, owner, rub)
+	_, err := st.accountsPool.Exec(ctx, `UPDATE accounts SET status = 'frozen' WHERE id = $1`, src.ID)
+	require.NoError(t, err)
+
+	tr := mustTransfer(t, ctx, st.transfers, owner, src.ID, dst.ID, money.New(400, rub), rub)
 	require.Equal(t, transferdomain.StatusFailed, tr.Status)
 	require.Equal(t, transferdomain.FailureAccountNotActive, tr.FailureCode)
 	require.Equal(t, int64(1_000), accountBalance(t, ctx, st.accountsPool, src.ID))
-	require.Equal(t, int64(0), accountBalance(t, ctx, st.accountsPool, dst.ID))
-	require.Equal(t, int64(0), holdsByStatus(t, ctx, st.accountsPool, "active"))
-	require.Equal(t, int64(1), holdsByStatus(t, ctx, st.accountsPool, "released"))
+	require.Equal(t, int64(0), holdCount(t, ctx, st.accountsPool))
+
+	var step, outcome string
+	require.NoError(t, st.transfersPool.QueryRow(ctx, `
+		SELECT step, outcome FROM transfer_steps WHERE transfer_id = $1`, tr.ID).Scan(&step, &outcome))
+	require.Equal(t, "hold", step)
+	require.Equal(t, "business_error", outcome)
 }
 
 func TestE2E_LostCaptureResponseIsRecovered(t *testing.T) {

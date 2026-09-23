@@ -168,6 +168,38 @@ func TestAccountsService_WithdrawInsufficientKeepsKeyFree(t *testing.T) {
 	require.Equal(t, int64(400), res.Account.Balance)
 }
 
+func TestAccountsService_ClosedRejectsDepositFrozenRejectsWithdraw(t *testing.T) {
+	ctx := testContext(t)
+	pool := testenv.MigratedPool(t, migrations.Accounts())
+	svc := newAccountsService(pool)
+	usd := mustCurrency(t, "USD")
+	owner := uuid.Must(uuid.NewV7())
+
+	closed := openAccount(t, ctx, svc, owner, usd)
+	_, err := pool.Exec(ctx, `UPDATE accounts SET status = 'closed' WHERE id = $1`, closed.ID)
+	require.NoError(t, err)
+	_, err = svc.Deposit(ctx, service.DepositCmd{
+		Idem:      service.Idem{Key: idempotency.Namespace(owner.String(), "dep-closed"), RequestHash: []byte("dep-closed")},
+		OwnerID:   owner,
+		AccountID: closed.ID,
+		Amount:    money.New(100, usd),
+	})
+	require.ErrorIs(t, err, domain.ErrAccountNotActive)
+	require.Equal(t, int64(0), accountBalance(t, ctx, pool, closed.ID))
+
+	frozen := fundAccount(t, ctx, svc, owner, usd, 500)
+	_, err = pool.Exec(ctx, `UPDATE accounts SET status = 'frozen' WHERE id = $1`, frozen.ID)
+	require.NoError(t, err)
+	_, err = svc.Withdraw(ctx, service.WithdrawCmd{
+		Idem:      service.Idem{Key: idempotency.Namespace(owner.String(), "wd-frozen"), RequestHash: []byte("wd-frozen")},
+		OwnerID:   owner,
+		AccountID: frozen.ID,
+		Amount:    money.New(100, usd),
+	})
+	require.ErrorIs(t, err, domain.ErrAccountNotActive)
+	require.Equal(t, int64(500), accountBalance(t, ctx, pool, frozen.ID))
+}
+
 func TestAccountsService_HoldCaptureAndRelease(t *testing.T) {
 	ctx := testContext(t)
 	pool := testenv.MigratedPool(t, migrations.Accounts())
