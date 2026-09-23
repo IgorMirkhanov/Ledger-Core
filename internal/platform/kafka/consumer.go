@@ -91,10 +91,9 @@ func NewConsumer(cfg ConsumerConfig, h Handler, log *slog.Logger) (*Consumer, er
 
 func (c *Consumer) Name() string { return "kafka-consumer" }
 
-// Run polls until ctx is cancelled. The in-flight record is finished and its
-// offset committed before Run returns. Records are valid only until the next
-// poll, so each fetch is fully processed first; partitions of one fetch run
-// in parallel, so a retry does not block other partitions of that fetch.
+// Run polls until ctx is cancelled. A finished prefix of a partition is committed
+// at its last processed record; the rest of the fetch stays uncommitted.
+// Partitions of one fetch run in parallel. Retry backoff stops when ctx is cancelled.
 func (c *Consumer) Run(ctx context.Context) error {
 	defer c.cl.Close()
 	for {
@@ -149,20 +148,34 @@ func (c *Consumer) handleFetches(ctx context.Context, fetches kgo.Fetches) error
 }
 
 func (c *Consumer) handlePartition(ctx context.Context, recs []*kgo.Record) error {
+	// Commit only the last record this partition actually finished. Committing the
+	// whole fetch would advance the offset past records that were never handled.
+	var last *kgo.Record
+	var procErr error
 	for _, rec := range recs {
-		if err := c.processRecord(ctx, rec); err != nil {
-			return err
-		}
 		if ctx.Err() != nil {
-			return errShutdown
+			procErr = errShutdown
+			break
+		}
+		done, err := c.processRecord(ctx, rec)
+		if done {
+			last = rec
+		}
+		if err != nil {
+			procErr = err
+			break
 		}
 	}
-	return nil
+	if last != nil {
+		// Shutdown must still commit the prefix that was finished.
+		if err := c.commit(context.WithoutCancel(ctx), last); err != nil {
+			return err
+		}
+	}
+	return procErr
 }
 
-func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) error {
-	// The in-flight record must complete across shutdown so its offset can be committed.
-	work := context.WithoutCancel(ctx)
+func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) (bool, error) {
 	msg := Message{
 		Topic:     rec.Topic,
 		Partition: rec.Partition,
@@ -171,19 +184,31 @@ func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) error {
 		Value:     rec.Value,
 		Headers:   headerMap(rec),
 	}
-	// TODO(prompt-03): extract W3C traceparent from headers into work via the otel propagator.
+	// TODO(prompt-03): extract W3C traceparent from headers into ctx via the otel propagator.
 	if err := json.Unmarshal(rec.Value, &msg.Envelope); err != nil {
-		return c.toDLQ(work, rec, fmt.Errorf("invalid envelope: %w", err), 0)
+		if err := c.publishDLQ(ctx, rec, fmt.Errorf("invalid envelope: %w", err), 0); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	var last error
 	for attempt := 1; attempt <= c.cfg.MaxAttempts; attempt++ {
-		err := c.h(work, msg)
+		if ctx.Err() != nil {
+			return false, errShutdown
+		}
+		err := c.h(ctx, msg)
 		if err == nil {
-			return c.commit(work, rec)
+			return true, nil
+		}
+		if ctx.Err() != nil {
+			return false, errShutdown
 		}
 		last = err
 		if errors.Is(err, ErrPermanent) {
-			return c.toDLQ(work, rec, err, attempt)
+			if err := c.publishDLQ(ctx, rec, err, attempt); err != nil {
+				return false, err
+			}
+			return true, nil
 		}
 		if attempt == c.cfg.MaxAttempts {
 			break
@@ -195,13 +220,20 @@ func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) error {
 			slog.Int("attempt", attempt),
 			slog.Any("error", err),
 		)
-		// Finish this record even while the process is shutting down.
-		pause(c.cfg.RetryBackoff(attempt))
+		if err := pause(ctx, c.cfg.RetryBackoff(attempt)); err != nil {
+			return false, errShutdown
+		}
 	}
-	return c.toDLQ(work, rec, last, c.cfg.MaxAttempts)
+	if ctx.Err() != nil {
+		return false, errShutdown
+	}
+	if err := c.publishDLQ(ctx, rec, last, c.cfg.MaxAttempts); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
-func (c *Consumer) toDLQ(ctx context.Context, rec *kgo.Record, cause error, attempts int) error {
+func (c *Consumer) publishDLQ(ctx context.Context, rec *kgo.Record, cause error, attempts int) error {
 	msg := ""
 	if cause != nil {
 		msg = cause.Error()
@@ -222,9 +254,6 @@ func (c *Consumer) toDLQ(ctx context.Context, rec *kgo.Record, cause error, atte
 	defer cancel()
 	if err := c.cl.ProduceSync(pubCtx, out).FirstErr(); err != nil {
 		return fmt.Errorf("kafka: dlq publish: %w", err)
-	}
-	if err := c.commit(ctx, rec); err != nil {
-		return err
 	}
 	c.log.Warn("record sent to dlq",
 		slog.String("topic", rec.Topic),
@@ -270,11 +299,16 @@ func defaultBackoff(attempt int) time.Duration {
 	return d
 }
 
-func pause(d time.Duration) {
+func pause(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
-		return
+		return nil
 	}
 	timer := time.NewTimer(d)
 	defer timer.Stop()
-	<-timer.C
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

@@ -124,13 +124,18 @@ func TestIdempotency_ConcurrentSingleSideEffect(t *testing.T) {
 
 	var (
 		wg       sync.WaitGroup
+		ready    sync.WaitGroup
 		replayed atomic.Int32
 		errs     [n]error
 	)
+	start := make(chan struct{})
 	wg.Add(n)
+	ready.Add(n)
 	for i := range n {
 		go func() {
 			defer wg.Done()
+			ready.Done()
+			<-start
 			errs[i] = txm.WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 				rec, err := store.Begin(ctx, tx, scope, key, hash)
 				if err != nil {
@@ -147,6 +152,8 @@ func TestIdempotency_ConcurrentSingleSideEffect(t *testing.T) {
 			})
 		}()
 	}
+	ready.Wait()
+	close(start)
 	wg.Wait()
 	for _, err := range errs {
 		require.NoError(t, err)

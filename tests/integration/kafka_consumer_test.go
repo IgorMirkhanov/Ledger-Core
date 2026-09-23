@@ -48,6 +48,91 @@ func TestKafkaConsumer_CommitsOffsets(t *testing.T) {
 	require.Never(t, func() bool { return again.Load() > 0 }, 3*time.Second, 100*time.Millisecond)
 }
 
+func TestKafkaConsumer_CommitsProcessedPrefixOnly(t *testing.T) {
+	brokers := testenv.StartRedpanda(t)
+	topic := topicName(t)
+	ensureTopic(t, brokers, topic)
+	produceEnvelopes(t, brokers, topic, 10, func(i int) string { return fmt.Sprintf("k-%d", i) })
+
+	adm := adminClient(t, brokers)
+	blocked := make(chan struct{})
+	var once sync.Once
+	var got atomic.Int32
+	stop := runConsumer(t, brokers, topic, topic+".dlq", 5, func(ctx context.Context, _ kafka.Message) error {
+		if got.Add(1) <= 5 {
+			return nil
+		}
+		once.Do(func() { close(blocked) })
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	select {
+	case <-blocked:
+	case <-time.After(20 * time.Second):
+		t.Fatal("handler did not reach the unprocessed tail")
+	}
+	stop()
+
+	require.Eventually(t, func() bool {
+		return committedOffset(adm, topicName(t), topic) == 5
+	}, 10*time.Second, 50*time.Millisecond)
+
+	var tail atomic.Int32
+	runConsumer(t, brokers, topic, topic+".dlq", 5, func(context.Context, kafka.Message) error {
+		tail.Add(1)
+		return nil
+	})
+	require.Eventually(t, func() bool { return tail.Load() == 5 }, 20*time.Second, 50*time.Millisecond)
+}
+
+func TestKafkaConsumer_RetryStopsOnCancel(t *testing.T) {
+	brokers := testenv.StartRedpanda(t)
+	topic := topicName(t)
+	dlq := topic + ".dlq"
+	ensureTopic(t, brokers, topic)
+	ensureTopic(t, brokers, dlq)
+	produceEnvelopes(t, brokers, topic, 1, func(int) string { return "k" })
+
+	var calls atomic.Int32
+	c, err := kafka.NewConsumer(kafka.ConsumerConfig{
+		Brokers:     brokers,
+		Group:       topicName(t),
+		Topics:      []string{topic},
+		MaxAttempts: 5,
+		DLQTopic:    dlq,
+		RetryBackoff: func(int) time.Duration {
+			return 30 * time.Second
+		},
+	}, func(context.Context, kafka.Message) error {
+		calls.Add(1)
+		return errors.New("temporary")
+	}, slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = c.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	require.Eventually(t, func() bool { return calls.Load() == 1 }, 20*time.Second, 20*time.Millisecond)
+	started := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown waited out the retry backoff")
+	}
+	require.Less(t, time.Since(started), 5*time.Second)
+	require.Equal(t, int64(0), logEndOffset(adminClient(t, brokers), dlq))
+	require.Equal(t, int32(1), calls.Load())
+}
+
 func TestKafkaConsumer_RetriesThenSucceeds(t *testing.T) {
 	brokers := testenv.StartRedpanda(t)
 	topic := topicName(t)
