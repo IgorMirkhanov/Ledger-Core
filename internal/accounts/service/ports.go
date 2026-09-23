@@ -18,6 +18,8 @@ import (
 
 var (
 	// ErrHoldReferenceExists is holds_reference_uniq: this account already has a hold with the reference.
+	// It aborts the surrounding transaction, so it is a bug signal, not a flow-control path:
+	// CreateHold must call FindHold under the account lock before inserting.
 	ErrHoldReferenceExists = errors.New("HOLD_REFERENCE_EXISTS")
 	// ErrEntryReferenceExists is journal_entries_reference_uniq.
 	ErrEntryReferenceExists = errors.New("ENTRY_REFERENCE_EXISTS")
@@ -29,7 +31,9 @@ type Repository interface {
 	CreateAccount(ctx context.Context, q postgres.Querier, a *domain.Account) error
 	GetAccount(ctx context.Context, q postgres.Querier, id uuid.UUID) (*domain.Account, error)
 	ListAccountsByOwner(ctx context.Context, q postgres.Querier, owner uuid.UUID) ([]*domain.Account, error)
-	GetSystemAccount(ctx context.Context, q postgres.Querier, prefix string, cur money.Currency) (*domain.Account, error)
+	// SystemAccountID returns the id of "<prefix>.<CUR>". Ids are cached: a hit costs no query.
+	// Only the id is returned on purpose: balances must be read through LockAccounts, never from an unlocked snapshot.
+	SystemAccountID(ctx context.Context, q postgres.Querier, prefix string, cur money.Currency) (uuid.UUID, error)
 
 	// LockAccounts selects accounts FOR UPDATE in ascending id order (deadlock prevention).
 	// Returns ErrAccountNotFound if any id is missing.
@@ -41,6 +45,9 @@ type Repository interface {
 	InsertEntry(ctx context.Context, q postgres.Querier, e *domain.JournalEntry) error
 
 	CreateHold(ctx context.Context, q postgres.Querier, h *domain.Hold) error
+	// FindHold returns the hold of accountID with referenceID, or domain.ErrHoldNotFound.
+	// Call it while holding the account lock: that serializes hold creation per account.
+	FindHold(ctx context.Context, q postgres.Querier, accountID uuid.UUID, referenceID string) (*domain.Hold, error)
 	LockHold(ctx context.Context, q postgres.Querier, id uuid.UUID) (*domain.Hold, error)
 	UpdateHold(ctx context.Context, q postgres.Querier, h *domain.Hold) error
 	// LockExpiredHolds returns up to limit active holds with expires_at <= now, FOR UPDATE SKIP LOCKED.

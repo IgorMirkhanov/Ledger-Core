@@ -82,20 +82,21 @@ func (r *Repository) ListAccountsByOwner(ctx context.Context, q postgres.Querier
 	return out, nil
 }
 
-func (r *Repository) GetSystemAccount(ctx context.Context, q postgres.Querier, prefix string, cur money.Currency) (*domain.Account, error) {
+func (r *Repository) SystemAccountID(ctx context.Context, q postgres.Querier, prefix string, cur money.Currency) (uuid.UUID, error) {
 	code := domain.SystemCode(prefix, cur)
 	if cached, ok := r.systemIDs.Load(code); ok {
-		return r.GetAccount(ctx, q, cached.(uuid.UUID))
+		return cached.(uuid.UUID), nil
 	}
-	a, err := scanAccount(q.QueryRow(ctx, `SELECT `+accountCols+` FROM accounts WHERE code = $1`, code))
+	var id uuid.UUID
+	err := q.QueryRow(ctx, `SELECT id FROM accounts WHERE code = $1 AND kind = 'system'`, code).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, domain.ErrAccountNotFound
+		return uuid.Nil, domain.ErrAccountNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("accounts: get system account: %w", err)
+		return uuid.Nil, fmt.Errorf("accounts: system account id: %w", err)
 	}
-	r.systemIDs.Store(code, a.ID)
-	return a, nil
+	r.systemIDs.Store(code, id)
+	return id, nil
 }
 
 func (r *Repository) LockAccounts(ctx context.Context, q postgres.Querier, ids []uuid.UUID) (map[uuid.UUID]*domain.Account, error) {
@@ -215,6 +216,20 @@ func (r *Repository) CreateHold(ctx context.Context, q postgres.Querier, h *doma
 		return fmt.Errorf("accounts: create hold: %w", err)
 	}
 	return nil
+}
+
+func (r *Repository) FindHold(ctx context.Context, q postgres.Querier, accountID uuid.UUID, referenceID string) (*domain.Hold, error) {
+	h, err := scanHold(q.QueryRow(ctx, `
+		SELECT id, account_id, amount, status, reference_id, expires_at, journal_entry_id, created_at, updated_at
+		FROM holds
+		WHERE account_id = $1 AND reference_id = $2`, accountID, referenceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrHoldNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("accounts: find hold: %w", err)
+	}
+	return h, nil
 }
 
 func (r *Repository) LockHold(ctx context.Context, q postgres.Querier, id uuid.UUID) (*domain.Hold, error) {

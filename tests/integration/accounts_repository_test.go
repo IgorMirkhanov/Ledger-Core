@@ -57,15 +57,24 @@ func TestAccountsRepository_CreateGetList(t *testing.T) {
 	require.Equal(t, first.ID, list[0].ID)
 	require.Equal(t, second.ID, list[1].ID)
 
-	sys, err := repo.GetSystemAccount(ctx, pool, domain.SystemSettlement, usd)
+	sysID, err := repo.SystemAccountID(ctx, pool, domain.SystemSettlement, usd)
 	require.NoError(t, err)
-	require.Equal(t, systemAccount(t, ctx, pool, "settlement.USD"), sys.ID)
+	require.Equal(t, systemAccount(t, ctx, pool, "settlement.USD"), sysID)
+	sys, err := repo.GetAccount(ctx, pool, sysID)
+	require.NoError(t, err)
 	require.Equal(t, domain.KindSystem, sys.Kind)
 	require.Equal(t, uuid.Nil, sys.OwnerID)
 	require.True(t, sys.AllowOverdraft)
-	again, err := repo.GetSystemAccount(ctx, pool, domain.SystemSettlement, usd)
+
+	// A cache hit must not touch the database: a cancelled context would fail any query.
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	again, err := repo.SystemAccountID(cancelled, pool, domain.SystemSettlement, usd)
 	require.NoError(t, err)
-	require.Equal(t, sys.ID, again.ID)
+	require.Equal(t, sysID, again)
+
+	_, err = repo.SystemAccountID(ctx, pool, "nope", usd)
+	require.ErrorIs(t, err, domain.ErrAccountNotFound)
 }
 
 func TestAccountsRepository_LockAccounts(t *testing.T) {
@@ -150,22 +159,22 @@ func TestAccountsRepository_EntryAndStatement(t *testing.T) {
 	txm := postgres.NewTxManager(pool)
 	usd := mustCurrency(t, "USD")
 	customer := createCustomer(t, ctx, pool, repo)
-	settlement, err := repo.GetSystemAccount(ctx, pool, domain.SystemSettlement, usd)
+	settlementID, err := repo.SystemAccountID(ctx, pool, domain.SystemSettlement, usd)
 	require.NoError(t, err)
 
 	const n = 25
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	require.NoError(t, txm.WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		locked, err := repo.LockAccounts(ctx, tx, []uuid.UUID{customer.ID, settlement.ID})
+		locked, err := repo.LockAccounts(ctx, tx, []uuid.UUID{customer.ID, settlementID})
 		if err != nil {
 			return err
 		}
 		for i := 1; i <= n; i++ {
-			if err := postDeposit(ctx, tx, repo, locked, customer.ID, settlement.ID, usd, now, uuid.Must(uuid.NewV7()).String()); err != nil {
+			if err := postDeposit(ctx, tx, repo, locked, customer.ID, settlementID, usd, now, uuid.Must(uuid.NewV7()).String()); err != nil {
 				return err
 			}
 		}
-		return repo.UpdateBalances(ctx, tx, locked[customer.ID], locked[settlement.ID])
+		return repo.UpdateBalances(ctx, tx, locked[customer.ID], locked[settlementID])
 	}))
 
 	var page []service.StatementLine
@@ -222,26 +231,26 @@ func TestAccountsRepository_DuplicateEntryReference(t *testing.T) {
 	txm := postgres.NewTxManager(pool)
 	usd := mustCurrency(t, "USD")
 	customer := createCustomer(t, ctx, pool, repo)
-	settlement, err := repo.GetSystemAccount(ctx, pool, domain.SystemSettlement, usd)
+	settlementID, err := repo.SystemAccountID(ctx, pool, domain.SystemSettlement, usd)
 	require.NoError(t, err)
 	now := time.Now().UTC()
 
 	require.NoError(t, txm.WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		locked, err := repo.LockAccounts(ctx, tx, []uuid.UUID{customer.ID, settlement.ID})
+		locked, err := repo.LockAccounts(ctx, tx, []uuid.UUID{customer.ID, settlementID})
 		if err != nil {
 			return err
 		}
-		if err := postDeposit(ctx, tx, repo, locked, customer.ID, settlement.ID, usd, now, "same-ref"); err != nil {
+		if err := postDeposit(ctx, tx, repo, locked, customer.ID, settlementID, usd, now, "same-ref"); err != nil {
 			return err
 		}
-		return repo.UpdateBalances(ctx, tx, locked[customer.ID], locked[settlement.ID])
+		return repo.UpdateBalances(ctx, tx, locked[customer.ID], locked[settlementID])
 	}))
 	err = txm.WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		locked, err := repo.LockAccounts(ctx, tx, []uuid.UUID{customer.ID, settlement.ID})
+		locked, err := repo.LockAccounts(ctx, tx, []uuid.UUID{customer.ID, settlementID})
 		if err != nil {
 			return err
 		}
-		return postDeposit(ctx, tx, repo, locked, customer.ID, settlement.ID, usd, now, "same-ref")
+		return postDeposit(ctx, tx, repo, locked, customer.ID, settlementID, usd, now, "same-ref")
 	})
 	require.ErrorIs(t, err, service.ErrEntryReferenceExists)
 }
@@ -289,6 +298,12 @@ func TestAccountsRepository_LockExpiredHoldsDisjoint(t *testing.T) {
 		UpdatedAt:   now,
 	})
 	require.ErrorIs(t, err, service.ErrHoldReferenceExists)
+
+	found, err := repo.FindHold(ctx, pool, account.ID, future.ReferenceID)
+	require.NoError(t, err)
+	require.Equal(t, future.ID, found.ID)
+	_, err = repo.FindHold(ctx, pool, account.ID, "missing")
+	require.ErrorIs(t, err, domain.ErrHoldNotFound)
 
 	var (
 		wg      sync.WaitGroup

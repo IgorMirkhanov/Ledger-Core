@@ -103,7 +103,7 @@ FOR UPDATE SKIP LOCKED;
 
 **Deposit(account, amount, key):**
 1. `idem.Begin(scope="accounts.Deposit", key, hash)`; replay → вернуть сохранённый ответ.
-2. `settlement := GetSystemAccount("settlement", cur)`.
+2. `settlementID := SystemAccountID("settlement", cur)` (из кэша, без запроса).
 3. `LockAccounts([account, settlement])`.
 4. Проверки: владелец, валюта, `CanCredit`.
 5. Построить `JournalEntry{kind=deposit, reference_type="deposit", reference_id=<namespaced key>}`,
@@ -115,9 +115,15 @@ FOR UPDATE SKIP LOCKED;
 **Withdraw:** зеркально, `account −X`, `settlement +X`, событие `account.debited`.
 
 **CreateHold(account, amount, reference, ttl, key):**
-1. idem.Begin → 2. `LockAccounts([account])` → 3. `acc.Reserve(amount)` →
-4. `INSERT holds` (при `holds_reference_uniq` конфликте вернуть существующий холд, если сумма совпадает) →
-5. `UpdateBalances` → 6. outbox `hold.created` → 7. idem.Complete.
+1. idem.Begin → 2. `LockAccounts([account])` →
+3. `FindHold(account, reference)` **под блокировкой счёта**: нашёлся → вернуть его, если сумма совпадает,
+   иначе `ErrValidation`; ничего не резервировать →
+4. `acc.Reserve(amount)` → 5. `INSERT holds` → 6. `UpdateBalances` → 7. outbox `hold.created` → 8. idem.Complete.
+
+> Почему не «INSERT и поймать `holds_reference_uniq`»: ошибка уникальности **обрывает всю транзакцию**
+> Postgres (`current transaction is aborted`). После неё нельзя ни прочитать существующий холд, ни записать
+> ответ идемпотентности. Блокировка счёта сериализует создание холдов на нём, поэтому проверка до вставки
+> не даёт гонки. `ErrHoldReferenceExists` остаётся только сигналом бага.
 
 **CaptureHold(hold, dest, destAmount, key):**
 1. idem.Begin.

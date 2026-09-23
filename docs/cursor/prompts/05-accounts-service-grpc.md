@@ -30,7 +30,11 @@ tx.WithTx:
   и `x-owner-id` не задан. Если `x-owner-id` задан, проверка владельца выполняется даже для transfers
   (так transfers проверяет, что source принадлежит пользователю). `CreateHold/CaptureHold/ReleaseHold`
   без `x-caller=transfers` возвращают `PERMISSION_DENIED`.
-- CreateHold: при `ErrHoldReferenceExists` вернуть существующий холд, если amount совпадает, иначе `ErrValidation`.
+- CreateHold: после `LockAccounts` вызови `repo.FindHold(account, reference)`. Нашёлся → вернуть его, если amount
+  совпадает, иначе `ErrValidation`; `Reserve` при этом не вызывать. **Не** полагайся на `ErrHoldReferenceExists`:
+  ошибка уникальности обрывает транзакцию Postgres (см. `docs/database.md`, CreateHold).
+  Тест: два CreateHold с одним reference и **разными** idempotency-ключами → один холд, `held` увеличен один раз.
+- Системные счета: `repo.SystemAccountID(...)` (кэш), затем `LockAccounts`. Балансы только из `LockAccounts`.
 - CaptureHold: порядок `Unreserve` → `Apply`. dest.currency должен совпадать с `DestAmount.Currency` → иначе `ErrCurrencyMismatch`.
   Если валюты source и dest различаются — 4 проводки через `fx.<CUR>` (`domain.TransferPostings`).
 - ReleaseHold: `released`/`expired` → вернуть холд без изменений (идемпотентно); `captured` → `ErrHoldNotActive`.

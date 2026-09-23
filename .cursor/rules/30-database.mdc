@@ -12,6 +12,10 @@ alwaysApply: false
 - Батчи: `unnest($1::uuid[], ...)` или `pgx.Batch`, а не N запросов в цикле.
 - Сканирование: `pgx.CollectRows` + `pgx.RowToStructByName` или явный `Scan`.
 - `pgx.ErrNoRows` → доменная ошибка NotFound. Unique violation на известных constraint → доменная ошибка (`postgres.ConstraintName(err)`).
+- Ошибка constraint'а внутри транзакции **обрывает всю транзакцию** (`current transaction is aborted`).
+  Никогда не строй ветку логики на «вставим и поймаем unique violation», если после этого в той же транзакции
+  нужны ещё запросы. Проверяй существование заранее под блокировкой, либо используй `INSERT ... ON CONFLICT DO NOTHING RETURNING`,
+  либо `SAVEPOINT`. Маппинг unique violation в доменную ошибку допустим, только если транзакция после него откатывается.
 - Пагинация — keyset (`WHERE id < $cursor ORDER BY id DESC LIMIT n`). OFFSET запрещён.
 - Новая миграция: `make migration svc=<service> name=<snake_case>`, всегда с `-- +goose Down`.
 - Любой новый запрос по большой таблице — проверь, что есть индекс (напиши EXPLAIN в описании коммита, если сомневаешься).
