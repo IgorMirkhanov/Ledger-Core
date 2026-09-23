@@ -105,6 +105,26 @@ func TestIdempotencyKeyIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestReleaseBugBecomesManualReview(t *testing.T) {
+	tr := newT(t)
+	must(t, tr.OnHoldCreated(uuid.New(), now))
+	must(t, tr.OnCaptureRejected(FailureAccountNotActive, "frozen", now))
+	version := tr.Version
+	for range ReleaseAttemptLimit - 1 {
+		must(t, tr.OnReleaseBug("captured", now, func(int) time.Duration { return time.Second }))
+		if tr.Status != StatusCompensating {
+			t.Fatalf("status = %s", tr.Status)
+		}
+	}
+	must(t, tr.OnReleaseBug("captured", now, func(int) time.Duration { return time.Second }))
+	if tr.Status != StatusFailed || tr.FailureCode != FailureManualReview || tr.Attempts != ReleaseAttemptLimit {
+		t.Fatalf("state = %+v", tr)
+	}
+	if tr.Version != version+int64(ReleaseAttemptLimit) {
+		t.Fatalf("version = %d, want %d", tr.Version, version+int64(ReleaseAttemptLimit))
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

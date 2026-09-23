@@ -17,8 +17,11 @@ import (
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/logger"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/outbox"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/postgres"
+	"github.com/IgorMirkhanov/ledger-core/internal/transfers/accountsclient"
+	"github.com/IgorMirkhanov/ledger-core/internal/transfers/repository"
 	"github.com/IgorMirkhanov/ledger-core/internal/transfers/service"
 	"github.com/IgorMirkhanov/ledger-core/internal/transfers/transport"
+	"github.com/IgorMirkhanov/ledger-core/internal/transfers/worker"
 	"github.com/IgorMirkhanov/ledger-core/migrations"
 )
 
@@ -66,9 +69,12 @@ func run() error {
 		return err
 	}
 
-	// TODO(prompt-06): repository.New(), accountsclient.New(cfg.AccountsAddr) instead of nil.
-	svc := service.New(nil, postgres.NewTxManager(pool), idempotency.NewStore(),
-		outbox.NewWriter(cfg.ServiceName), nil, clock{})
+	accounts, err := accountsclient.New(cfg.AccountsAddr)
+	if err != nil {
+		return err
+	}
+	svc := service.New(repository.New(), postgres.NewTxManager(pool), idempotency.NewStore(),
+		outbox.NewWriter(cfg.ServiceName), accounts, clock{})
 
 	grpcSrv := grpcx.NewServer(cfg.GRPC.Addr, log)
 	transfersv1.RegisterTransfersServiceServer(grpcSrv.Registrar(), transport.NewHandler(svc))
@@ -88,7 +94,8 @@ func run() error {
 	a.Go(grpcSrv)
 	a.Go(admin)
 	a.Go(relay)
-	// TODO(prompt-06): a.Go(recovery worker ticking every cfg.RecoveryTick).
+	a.Go(worker.NewRecovery(svc, cfg.RecoveryTick))
+	a.OnShutdown("accounts-client", func(context.Context) error { return accounts.Close() })
 	a.OnShutdown("postgres", func(context.Context) error { pool.Close(); return nil })
 	a.OnShutdown("kafka", producer.Close)
 	return a.Run(ctx)

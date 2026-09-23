@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"errors"
 	"math/rand/v2"
 	"time"
@@ -9,7 +8,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/IgorMirkhanov/ledger-core/internal/money"
-	"github.com/IgorMirkhanov/ledger-core/internal/transfers/domain"
 )
 
 var (
@@ -47,26 +45,6 @@ type CreateTransferCmd struct {
 }
 
 // Specs: docs/saga.md and docs/cursor/prompts/06-transfers-saga.md.
-
-// CreateTransfer persists the transfer (idempotently) and then drives it synchronously via Advance
-// until it is terminal or the ctx deadline is near. Returns the latest state.
-func (s *Service) CreateTransfer(ctx context.Context, cmd CreateTransferCmd) (*domain.Transfer, error) {
-	return nil, ErrNotImplemented
-}
-
-// Advance executes the next saga step of one transfer (one step per call, loop until terminal).
-// Safe to call concurrently for the same id: the transfer row is locked while its state changes.
-func (s *Service) Advance(ctx context.Context, id uuid.UUID) (*domain.Transfer, error) {
-	return nil, ErrNotImplemented
-}
-
-func (s *Service) GetTransfer(ctx context.Context, owner, id uuid.UUID) (*domain.Transfer, error) {
-	return nil, ErrNotImplemented
-}
-
-func (s *Service) ListTransfers(ctx context.Context, owner uuid.UUID, cursor *ListCursor, limit int) ([]*domain.Transfer, *ListCursor, error) {
-	return nil, nil, ErrNotImplemented
-}
 
 // Backoff returns exponential backoff with full jitter: rand[0, min(cap, base*2^attempt)).
 func Backoff(attempt int) time.Duration {

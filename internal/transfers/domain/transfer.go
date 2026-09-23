@@ -50,7 +50,11 @@ const (
 	FailureCurrencyMismatch  = "CURRENCY_MISMATCH"
 	FailureAccountNotFound   = "ACCOUNT_NOT_FOUND"
 	FailureNotAccountOwner   = "NOT_ACCOUNT_OWNER"
+	FailureManualReview      = "MANUAL_REVIEW"
 )
+
+// ReleaseAttemptLimit is how many refused release calls are retried before manual review.
+const ReleaseAttemptLimit = 20
 
 // Transfer is the saga aggregate.
 type Transfer struct {
@@ -186,6 +190,25 @@ func (t *Transfer) OnReleased(now time.Time) error {
 		return t.invalid(StatusFailed)
 	}
 	t.fail(t.FailureCode, t.FailureReason, now)
+	return nil
+}
+
+// OnReleaseBug records a release that accounts refused. The hold is already captured,
+// which is a bug: retry with backoff, and after ReleaseAttemptLimit fail for manual review.
+// Version is incremented once.
+func (t *Transfer) OnReleaseBug(reason string, now time.Time, backoff func(attempt int) time.Duration) error {
+	if t.Status != StatusCompensating {
+		return t.invalid(StatusFailed)
+	}
+	t.OnTransientError(now, backoff)
+	if t.Attempts < ReleaseAttemptLimit {
+		return nil
+	}
+	t.Status = StatusFailed
+	t.FailureCode = FailureManualReview
+	t.FailureReason = reason
+	t.CompletedAt = &now
+	t.NextAttemptAt = nil
 	return nil
 }
 
