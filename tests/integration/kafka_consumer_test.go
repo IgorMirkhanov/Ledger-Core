@@ -100,8 +100,10 @@ func TestKafkaConsumer_RetryStopsOnCancel(t *testing.T) {
 		Topics:      []string{topic},
 		MaxAttempts: 5,
 		DLQTopic:    dlq,
+		// One pause is longer than the shutdown deadline. Five pauses of 6s
+		// stay inside the consumer's 30s retry budget.
 		RetryBackoff: func(int) time.Duration {
-			return 30 * time.Second
+			return 6 * time.Second
 		},
 	}, func(context.Context, kafka.Message) error {
 		calls.Add(1)
@@ -131,6 +133,118 @@ func TestKafkaConsumer_RetryStopsOnCancel(t *testing.T) {
 	require.Less(t, time.Since(started), 5*time.Second)
 	require.Equal(t, int64(0), logEndOffset(adminClient(t, brokers), dlq))
 	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestKafkaConsumer_RebalanceDuringProcessing(t *testing.T) {
+	brokers := testenv.StartRedpanda(t)
+	topic := topicName(t)
+	ensureTopicPartitions(t, brokers, topic, 4)
+	const n = 200
+	produceEnvelopes(t, brokers, topic, n, func(i int) string { return fmt.Sprintf("k-%d", i) })
+
+	var mu sync.Mutex
+	seen := make(map[int]int, n)
+	handler := func(_ context.Context, msg kafka.Message) error {
+		time.Sleep(10 * time.Millisecond)
+		var body struct {
+			N int `json:"n"`
+		}
+		if err := json.Unmarshal(msg.Envelope.Data, &body); err != nil {
+			return fmt.Errorf("%w: %w", kafka.ErrPermanent, err)
+		}
+		mu.Lock()
+		seen[body.N]++
+		mu.Unlock()
+		return nil
+	}
+
+	group := topicName(t)
+	stopA := startMember(t, brokers, topic, group, handler)
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(seen) > 0
+	}, 20*time.Second, 20*time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
+	stopB := startMember(t, brokers, topic, group, handler)
+
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(seen) == n
+	}, 30*time.Second, 20*time.Millisecond)
+	require.NoError(t, stopA())
+	require.NoError(t, stopB())
+
+	var again atomic.Int32
+	runConsumer(t, brokers, topic, topic+".dlq", 5, func(context.Context, kafka.Message) error {
+		again.Add(1)
+		return nil
+	})
+	require.Never(t, func() bool { return again.Load() > 0 }, 3*time.Second, 100*time.Millisecond)
+}
+
+func TestKafkaConsumer_ShutdownFinishesInFlight(t *testing.T) {
+	brokers := testenv.StartRedpanda(t)
+	topic := topicName(t)
+	ensureTopic(t, brokers, topic)
+	produceEnvelopes(t, brokers, topic, 1, func(int) string { return "k" })
+
+	started := make(chan struct{})
+	finished := make(chan struct{})
+	var sawCancel atomic.Bool
+	c, err := kafka.NewConsumer(kafka.ConsumerConfig{
+		Brokers:      brokers,
+		Group:        topicName(t),
+		Topics:       []string{topic},
+		DLQTopic:     topic + ".dlq",
+		RetryBackoff: func(int) time.Duration { return 0 },
+	}, func(ctx context.Context, _ kafka.Message) error {
+		if ctx.Err() != nil {
+			sawCancel.Store(true)
+		}
+		close(started)
+		time.Sleep(300 * time.Millisecond)
+		if ctx.Err() != nil {
+			sawCancel.Store(true)
+		}
+		close(finished)
+		return nil
+	}, slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	exited := make(chan struct{})
+	go func() {
+		done <- c.Run(ctx)
+		close(exited)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-exited
+	})
+
+	select {
+	case <-started:
+	case <-time.After(20 * time.Second):
+		t.Fatal("handler did not start")
+	}
+	cancel()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("in-flight handler did not finish after cancel")
+	}
+	require.False(t, sawCancel.Load())
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("consumer did not exit after the in-flight record")
+	}
+	require.Equal(t, int64(1), committedOffset(adminClient(t, brokers), topicName(t), topic))
 }
 
 func TestKafkaConsumer_RetriesThenSucceeds(t *testing.T) {
@@ -260,6 +374,46 @@ func TestKafkaConsumer_PermanentErrorSkipsRetries(t *testing.T) {
 		return calls.Load() == 1 && logEndOffset(adm, dlq) == 1
 	}, 20*time.Second, 50*time.Millisecond)
 	require.Equal(t, "1", recordHeaders(consumeOne(t, brokers, dlq))["x-attempts"])
+}
+
+func startMember(t *testing.T, brokers []string, topic, group string, h kafka.Handler) func() error {
+	t.Helper()
+	c, err := kafka.NewConsumer(kafka.ConsumerConfig{
+		Brokers:      brokers,
+		Group:        group,
+		Topics:       []string{topic},
+		DLQTopic:     topic + ".dlq",
+		RetryBackoff: func(int) time.Duration { return 0 },
+	}, h, slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- c.Run(ctx) }()
+	var once sync.Once
+	var runErr error
+	stop := func() error {
+		once.Do(func() {
+			cancel()
+			runErr = <-done
+		})
+		return runErr
+	}
+	t.Cleanup(func() { _ = stop() })
+	return stop
+}
+
+func ensureTopicPartitions(t *testing.T, brokers []string, topic string, partitions int32) {
+	t.Helper()
+	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...))
+	require.NoError(t, err)
+	defer cl.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	resp, err := kadm.NewClient(cl).CreateTopics(ctx, partitions, 1, nil, topic)
+	require.NoError(t, err)
+	require.NoError(t, resp.Error())
 }
 
 func runConsumer(t *testing.T, brokers []string, topic, dlq string, attempts int, h kafka.Handler) func() {

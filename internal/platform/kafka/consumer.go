@@ -15,6 +15,16 @@ import (
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/outbox"
 )
 
+const (
+	// maxRecordsPerPoll bounds work between AllowRebalance calls so a poll
+	// stays inside the broker rebalance timeout.
+	maxRecordsPerPoll = 500
+	// maxRetryBudget is the longest in-memory retry pause for one record.
+	maxRetryBudget = 30 * time.Second
+	// handlerTimeout lets the in-flight handler finish after Run is cancelled.
+	handlerTimeout = 10 * time.Second
+)
+
 // errShutdown stops the partition loop after the in-flight record. Run maps it to a nil exit.
 var errShutdown = errors.New("shutdown")
 
@@ -72,6 +82,9 @@ func NewConsumer(cfg ConsumerConfig, h Handler, log *slog.Logger) (*Consumer, er
 	if cfg.RetryBackoff == nil {
 		cfg.RetryBackoff = defaultBackoff
 	}
+	if err := validateRetryBudget(cfg.MaxAttempts, cfg.RetryBackoff); err != nil {
+		return nil, err
+	}
 	if log == nil {
 		log = slog.Default()
 	}
@@ -80,6 +93,7 @@ func NewConsumer(cfg ConsumerConfig, h Handler, log *slog.Logger) (*Consumer, er
 		kgo.ConsumerGroup(cfg.Group),
 		kgo.ConsumeTopics(cfg.Topics...),
 		kgo.DisableAutoCommit(),
+		kgo.BlockRebalanceOnPoll(),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.FetchMaxWait(200*time.Millisecond),
 	)
@@ -93,30 +107,47 @@ func (c *Consumer) Name() string { return "kafka-consumer" }
 
 // Run polls until ctx is cancelled. A finished prefix of a partition is committed
 // at its last processed record; the rest of the fetch stays uncommitted.
-// Partitions of one fetch run in parallel. Retry backoff stops when ctx is cancelled.
+// Partitions of one fetch run in parallel. Rebalance is blocked from poll until
+// the fetch is finished, so a commit cannot land on a partition this member no
+// longer owns. Retry backoff stops when ctx is cancelled. The handler of the
+// in-flight record keeps running after cancel, bounded by handlerTimeout.
 func (c *Consumer) Run(ctx context.Context) error {
 	defer c.cl.Close()
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
-		fetches := c.cl.PollFetches(ctx)
-		if ctx.Err() != nil {
-			return nil
-		}
-		if fetches.IsClientClosed() {
-			return nil
-		}
-		for _, ferr := range fetches.Errors() {
-			c.log.Warn("fetch error", slog.String("topic", ferr.Topic), slog.Any("error", ferr.Err))
-		}
-		if err := c.handleFetches(ctx, fetches); err != nil {
+		if err := c.pollOnce(ctx); err != nil {
 			if errors.Is(err, errShutdown) {
 				return nil
 			}
 			return err
 		}
 	}
+}
+
+// pollOnce fetches one bounded batch and processes it. AllowRebalance runs on
+// every exit, including fetch errors and shutdown, and before Run closes the
+// client. Close waits for a rebalance; skipping AllowRebalance deadlocks it.
+func (c *Consumer) pollOnce(ctx context.Context) error {
+	fetches := c.cl.PollRecords(ctx, maxRecordsPerPoll)
+	defer c.cl.AllowRebalance()
+	if fetches.IsClientClosed() {
+		return nil
+	}
+	for _, ferr := range fetches.Errors() {
+		if errors.Is(ferr.Err, context.Canceled) || errors.Is(ferr.Err, kgo.ErrClientClosed) {
+			continue
+		}
+		c.log.Warn("fetch error", slog.String("topic", ferr.Topic), slog.Any("error", ferr.Err))
+	}
+	if err := c.handleFetches(ctx, fetches); err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return errShutdown
+	}
+	return nil
 }
 
 func (c *Consumer) handleFetches(ctx context.Context, fetches kgo.Fetches) error {
@@ -196,7 +227,7 @@ func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) (bool, er
 		if ctx.Err() != nil {
 			return false, errShutdown
 		}
-		err := c.h(ctx, msg)
+		err := c.invoke(ctx, msg)
 		if err == nil {
 			return true, nil
 		}
@@ -231,6 +262,15 @@ func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) (bool, er
 		return false, err
 	}
 	return true, nil
+}
+
+// invoke gives the handler a context that survives Run cancellation, so an
+// in-flight database write can commit. The parent ctx is what backoff and the
+// gap between records observe.
+func (c *Consumer) invoke(ctx context.Context, msg Message) error {
+	hctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), handlerTimeout)
+	defer cancel()
+	return c.h(hctx, msg)
 }
 
 func (c *Consumer) publishDLQ(ctx context.Context, rec *kgo.Record, cause error, attempts int) error {
@@ -282,6 +322,18 @@ func headerMap(rec *kgo.Record) map[string]string {
 		h[hdr.Key] = string(hdr.Value)
 	}
 	return h
+}
+
+func validateRetryBudget(maxAttempts int, backoff func(int) time.Duration) error {
+	var sum time.Duration
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		d := backoff(attempt)
+		if d < 0 || d > maxRetryBudget || sum > maxRetryBudget-d {
+			return fmt.Errorf("kafka: consumer: retry budget exceeds %s", maxRetryBudget)
+		}
+		sum += d
+	}
+	return nil
 }
 
 func defaultBackoff(attempt int) time.Duration {

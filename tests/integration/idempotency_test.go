@@ -148,6 +148,11 @@ func TestIdempotency_ConcurrentSingleSideEffect(t *testing.T) {
 				if _, err := tx.Exec(ctx, `INSERT INTO side_effects DEFAULT VALUES`); err != nil {
 					return err
 				}
+				// Hold the unique-index lock long enough for the other 19
+				// transactions to block in Begin before this one commits.
+				if _, err := tx.Exec(ctx, `SELECT pg_sleep(0.2)`); err != nil {
+					return err
+				}
 				return store.Complete(ctx, tx, scope, key, []byte("ok"), "OK")
 			})
 		}()
