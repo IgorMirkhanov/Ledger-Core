@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,13 @@ import (
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/idempotency"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/outbox"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/postgres"
+)
+
+var (
+	// ErrHoldReferenceExists is holds_reference_uniq: this account already has a hold with the reference.
+	ErrHoldReferenceExists = errors.New("HOLD_REFERENCE_EXISTS")
+	// ErrEntryReferenceExists is journal_entries_reference_uniq.
+	ErrEntryReferenceExists = errors.New("ENTRY_REFERENCE_EXISTS")
 )
 
 // Repository is the persistence port. Every method takes a Querier so it can run inside a transaction.
