@@ -7,15 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/sony/gobreaker/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -36,20 +33,9 @@ type Client struct {
 }
 
 func New(addr string) (*Client, error) {
-	target := addr
-	if !strings.Contains(addr, "://") {
-		target = "dns:///" + addr
-	}
-	conn, err := grpc.NewClient(target,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                20 * time.Second,
-			Timeout:             10 * time.Second,
-			PermitWithoutStream: true,
-		}),
-	)
+	conn, err := grpcx.Dial(addr)
 	if err != nil {
-		return nil, fmt.Errorf("accounts client: dial: %w", err)
+		return nil, fmt.Errorf("accounts client: %w", err)
 	}
 	return newClient(accountsv1.NewAccountsServiceClient(conn), conn), nil
 }

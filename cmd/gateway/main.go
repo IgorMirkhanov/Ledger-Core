@@ -1,15 +1,21 @@
-// Command gateway is the public REST API: JWT auth, rate limiting, REST → gRPC.
 package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+
+	accountsv1 "github.com/IgorMirkhanov/ledger-core/gen/ledger/accounts/v1"
+	transfersv1 "github.com/IgorMirkhanov/ledger-core/gen/ledger/transfers/v1"
+	"github.com/IgorMirkhanov/ledger-core/internal/gateway"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/app"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/config"
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/grpcx"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/httpx"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/logger"
 )
@@ -40,15 +46,58 @@ func run() error {
 	log := logger.New(cfg.ServiceName, cfg.LogLevel)
 	slog.SetDefault(log)
 
-	// TODO(prompt-08): build chi router from internal/gateway with middleware + handlers, gRPC clients, redis.
-	api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		httpx.WriteProblem(w, httpx.Problem{
-			Type: "about:blank", Title: "Not implemented", Status: http.StatusNotImplemented, Code: "NOT_IMPLEMENTED",
-		})
+	accountsConn, err := grpcx.Dial(cfg.AccountsAddr)
+	if err != nil {
+		return err
+	}
+	transfersConn, err := grpcx.Dial(cfg.TransfersAddr)
+	if err != nil {
+		return err
+	}
+	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+
+	api := &gateway.API{
+		Accounts:  accountsv1.NewAccountsServiceClient(accountsConn),
+		Transfers: transfersv1.NewTransfersServiceClient(transfersConn),
+		JWTSecret: []byte(cfg.JWTSecret),
+		Upstream:  cfg.UpstreamTTL,
+		AppEnv:    cfg.Env,
+	}
+	router := gateway.NewRouter(gateway.Options{
+		API:         api,
+		Redis:       rdb,
+		RateLimit:   cfg.RateLimitRPS,
+		JWTSecret:   []byte(cfg.JWTSecret),
+		AppEnv:      cfg.Env,
+		UpstreamTTL: cfg.UpstreamTTL,
 	})
 
+	accountsHealth := healthpb.NewHealthClient(accountsConn)
+	transfersHealth := healthpb.NewHealthClient(transfersConn)
+	admin := httpx.AdminHandler(
+		httpx.ReadinessCheck{Name: "redis", Check: gateway.PingRedis(rdb)},
+		httpx.ReadinessCheck{Name: "accounts", Check: grpcReady(accountsHealth)},
+		httpx.ReadinessCheck{Name: "transfers", Check: grpcReady(transfersHealth)},
+	)
+
 	a := app.New(log, cfg.ShutdownTimeout)
-	a.Go(httpx.NewServer("public-api", cfg.HTTPAddr, api, log))
-	a.Go(httpx.NewServer("admin", cfg.AdminAddr, httpx.AdminHandler(), log))
+	a.Go(httpx.NewServer("public-api", cfg.HTTPAddr, router, log))
+	a.Go(httpx.NewServer("admin", cfg.AdminAddr, admin, log))
+	a.OnShutdown("accounts-grpc", func(context.Context) error { return accountsConn.Close() })
+	a.OnShutdown("transfers-grpc", func(context.Context) error { return transfersConn.Close() })
+	a.OnShutdown("redis", func(ctx context.Context) error { return rdb.Close() })
 	return a.Run(context.Background())
+}
+
+func grpcReady(c healthpb.HealthClient) func(context.Context) error {
+	return func(ctx context.Context) error {
+		resp, err := c.Check(ctx, &healthpb.HealthCheckRequest{})
+		if err != nil {
+			return err
+		}
+		if resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+			return fmt.Errorf("not serving: %s", resp.GetStatus())
+		}
+		return nil
+	}
 }
