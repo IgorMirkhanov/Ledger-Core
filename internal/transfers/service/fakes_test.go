@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"math/big"
+	"sort"
 	"sync"
 	"time"
 
@@ -98,8 +99,48 @@ func (r *memRepo) ListByOwner(context.Context, postgres.Querier, uuid.UUID, *Lis
 	return nil, nil
 }
 
-func (r *memRepo) ClaimPending(context.Context, postgres.Querier, time.Time, int) ([]uuid.UUID, error) {
-	return nil, nil
+func (r *memRepo) ClaimPending(_ context.Context, _ postgres.Querier, now, until time.Time, limit int) ([]uuid.UUID, error) {
+	type due struct {
+		id uuid.UUID
+		at time.Time
+	}
+	ready := make([]due, 0, len(r.transfers))
+	for id, tr := range r.transfers {
+		if tr.Status.IsTerminal() || tr.NextAttemptAt == nil || tr.NextAttemptAt.After(now) {
+			continue
+		}
+		ready = append(ready, due{id: id, at: *tr.NextAttemptAt})
+	}
+	sort.Slice(ready, func(i, j int) bool {
+		if ready[i].at.Equal(ready[j].at) {
+			return ready[i].id.String() < ready[j].id.String()
+		}
+		return ready[i].at.Before(ready[j].at)
+	})
+	if limit > len(ready) {
+		limit = len(ready)
+	}
+	ids := make([]uuid.UUID, 0, limit)
+	for _, item := range ready[:limit] {
+		at := until
+		tr := cloneTransfer(r.transfers[item.id])
+		tr.NextAttemptAt = &at
+		r.transfers[item.id] = tr
+		ids = append(ids, item.id)
+	}
+	return ids, nil
+}
+
+func (r *memRepo) Lease(_ context.Context, _ postgres.Querier, id uuid.UUID, until time.Time) error {
+	tr, ok := r.transfers[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	at := until
+	cloned := cloneTransfer(tr)
+	cloned.NextAttemptAt = &at
+	r.transfers[id] = cloned
+	return nil
 }
 
 func (r *memRepo) AppendStep(_ context.Context, _ postgres.Querier, s StepLog) error {

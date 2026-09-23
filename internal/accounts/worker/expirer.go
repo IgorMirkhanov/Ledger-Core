@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/IgorMirkhanov/ledger-core/internal/accounts/service"
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/metrics"
 )
 
 type holdExpirer interface {
@@ -93,7 +94,7 @@ func (w *HoldExpirer) expireOneByOne(ctx context.Context) {
 }
 
 func (w *HoldExpirer) note(id uuid.UUID, err error) {
-	workerErrors.WithLabelValues(w.Name()).Inc()
+	metrics.WorkerErrors.WithLabelValues(w.Name()).Inc()
 	args := []any{slog.String("component", w.Name()), slog.Any("error", err)}
 	if id != uuid.Nil {
 		args = append(args, slog.String("hold_id", id.String()))

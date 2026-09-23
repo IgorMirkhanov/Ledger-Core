@@ -126,16 +126,18 @@ func (s *Service) Advance(ctx context.Context, id uuid.UUID) (*domain.Transfer, 
 	return s.drive(ctx, current)
 }
 
-// ClaimPending locks a batch of due transfers and returns their ids. The transaction ends
-// before Advance, so the row lock is not held during the accounts call.
+// ClaimPending leases a batch of due transfers and returns their ids. The transaction ends
+// before Advance, so the row lock is not held during the accounts call. The lease keeps
+// other workers from claiming the same ids until it expires.
 func (s *Service) ClaimPending(ctx context.Context, limit int) ([]uuid.UUID, error) {
 	if limit <= 0 {
 		limit = claimBatch
 	}
+	now := s.clock.Now()
 	var ids []uuid.UUID
 	err := s.tx.WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		ids, err = s.repo.ClaimPending(ctx, tx, s.clock.Now(), limit)
+		ids, err = s.repo.ClaimPending(ctx, tx, now, now.Add(StepLease), limit)
 		return err
 	})
 	return ids, err
@@ -205,7 +207,13 @@ func (s *Service) advanceOnce(ctx context.Context, id uuid.UUID) (*domain.Transf
 	err := s.tx.WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		snapshot, err = s.repo.Lock(ctx, tx, id)
-		return err
+		if err != nil {
+			return err
+		}
+		if snapshot.Status.IsTerminal() || snapshot.NextStep() == domain.StepNone {
+			return nil
+		}
+		return s.repo.Lease(ctx, tx, id, s.clock.Now().Add(StepLease))
 	})
 	if err != nil {
 		return nil, false, err

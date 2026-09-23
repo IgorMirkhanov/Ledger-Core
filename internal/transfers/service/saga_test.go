@@ -211,6 +211,43 @@ func TestSaga_StopsWhenDeadlineIsNear(t *testing.T) {
 	require.Empty(t, rig.accounts.calls)
 }
 
+func TestSaga_InFlightStepIsHiddenFromClaim(t *testing.T) {
+	rig := newRig(t, false)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	rig.accounts.blockHold = func() {
+		once.Do(func() { close(entered) })
+		<-release
+	}
+	done := make(chan struct{})
+	var (
+		tr  *domain.Transfer
+		err error
+	)
+	go func() {
+		tr, err = rig.svc.CreateTransfer(context.Background(), rig.cmd("lease"))
+		close(done)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("CreateHold did not start")
+	}
+	ids, claimErr := rig.svc.ClaimPending(context.Background(), 10)
+	require.NoError(t, claimErr)
+	require.Empty(t, ids)
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("transfer did not finish")
+	}
+	require.NoError(t, err)
+	require.Equal(t, domain.StatusCompleted, tr.Status)
+	require.Equal(t, 1, rig.accounts.calls["transfer:"+tr.ID.String()+":hold"])
+}
+
 func TestGetTransfer_HidesForeignOwner(t *testing.T) {
 	rig := newRig(t, false)
 	tr, err := rig.svc.CreateTransfer(context.Background(), rig.cmd("get"))
@@ -314,6 +351,7 @@ type fakeAccounts struct {
 	captureGhost  int
 	releaseErr    error
 	beforeCapture func()
+	blockHold     func()
 	lastDest      money.Money
 }
 
@@ -327,6 +365,9 @@ func newFakeAccounts(infos map[uuid.UUID]AccountInfo) *fakeAccounts {
 }
 
 func (f *fakeAccounts) CreateHold(_ context.Context, key string, _ uuid.UUID, _ money.Money, _ string, _ time.Duration) (uuid.UUID, error) {
+	if f.blockHold != nil {
+		f.blockHold()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls[key]++

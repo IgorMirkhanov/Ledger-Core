@@ -20,6 +20,10 @@ const TopicTransferEvents = "ledger.transfers.v1"
 // HoldTTL must comfortably exceed the worst-case saga duration (all retries).
 const HoldTTL = 15 * time.Minute
 
+// StepLease hides an in-flight saga step from other workers. It must exceed the
+// accounts call timeout (3s).
+const StepLease = 10 * time.Second
+
 type Service struct {
 	repo     Repository
 	tx       TxManager

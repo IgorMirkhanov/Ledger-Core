@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/idempotency"
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/metrics"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/outbox"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/postgres"
 )
@@ -50,7 +51,7 @@ func (j *Janitor) Run(ctx context.Context) error {
 				fn = j.Sweep
 			}
 			if err := fn(ctx); err != nil && ctx.Err() == nil {
-				workerErrors.WithLabelValues(j.Name()).Inc()
+				metrics.WorkerErrors.WithLabelValues(j.Name()).Inc()
 				slog.Error("janitor sweep", slog.String("component", j.Name()), slog.Any("error", err))
 			}
 			timer.Reset(j.interval)

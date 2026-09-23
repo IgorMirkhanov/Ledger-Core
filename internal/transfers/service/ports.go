@@ -24,9 +24,11 @@ type Repository interface {
 	// Update persists the transfer with optimistic check: WHERE id = $1 AND version = t.Version-1.
 	Update(ctx context.Context, q postgres.Querier, t *domain.Transfer) error
 	ListByOwner(ctx context.Context, q postgres.Querier, owner uuid.UUID, cursor *ListCursor, limit int) ([]*domain.Transfer, error)
-	// ClaimPending returns ids of non-terminal transfers with next_attempt_at <= now,
-	// using FOR UPDATE SKIP LOCKED so several workers never pick the same transfer.
-	ClaimPending(ctx context.Context, q postgres.Querier, now time.Time, limit int) ([]uuid.UUID, error)
+	// ClaimPending marks up to limit due transfers as leased until lease (next_attempt_at = lease)
+	// and returns their ids. The lease does not change version. FOR UPDATE SKIP LOCKED.
+	ClaimPending(ctx context.Context, q postgres.Querier, now, lease time.Time, limit int) ([]uuid.UUID, error)
+	// Lease moves next_attempt_at to until without changing version or updated_at.
+	Lease(ctx context.Context, q postgres.Querier, id uuid.UUID, until time.Time) error
 	AppendStep(ctx context.Context, q postgres.Querier, s StepLog) error
 	GetRate(ctx context.Context, q postgres.Querier, base, quote money.Currency) (*big.Rat, error)
 }

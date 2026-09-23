@@ -138,14 +138,17 @@ func (r *Repository) ListByOwner(ctx context.Context, q postgres.Querier, owner 
 	return out, nil
 }
 
-func (r *Repository) ClaimPending(ctx context.Context, q postgres.Querier, now time.Time, limit int) ([]uuid.UUID, error) {
+func (r *Repository) ClaimPending(ctx context.Context, q postgres.Querier, now, lease time.Time, limit int) ([]uuid.UUID, error) {
 	rows, err := q.Query(ctx, `
-		SELECT id FROM transfers
-		WHERE status IN ('created', 'funds_held', 'compensating')
-		  AND next_attempt_at <= $1
-		ORDER BY next_attempt_at
-		LIMIT $2
-		FOR UPDATE SKIP LOCKED`, now, limit)
+		UPDATE transfers SET next_attempt_at = $2
+		WHERE id IN (
+			SELECT id FROM transfers
+			WHERE status IN ('created', 'funds_held', 'compensating')
+			  AND next_attempt_at <= $1
+			ORDER BY next_attempt_at
+			LIMIT $3
+			FOR UPDATE SKIP LOCKED)
+		RETURNING id`, now, lease, limit)
 	if err != nil {
 		return nil, fmt.Errorf("transfers: claim pending: %w", err)
 	}
@@ -162,6 +165,17 @@ func (r *Repository) ClaimPending(ctx context.Context, q postgres.Querier, now t
 		return nil, fmt.Errorf("transfers: claim pending: %w", err)
 	}
 	return ids, nil
+}
+
+func (r *Repository) Lease(ctx context.Context, q postgres.Querier, id uuid.UUID, until time.Time) error {
+	tag, err := q.Exec(ctx, `UPDATE transfers SET next_attempt_at = $2 WHERE id = $1`, id, until)
+	if err != nil {
+		return fmt.Errorf("transfers: lease: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *Repository) AppendStep(ctx context.Context, q postgres.Querier, s service.StepLog) error {

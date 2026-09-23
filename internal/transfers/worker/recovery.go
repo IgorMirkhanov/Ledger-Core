@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/metrics"
 	"github.com/IgorMirkhanov/ledger-core/internal/transfers/domain"
 	"github.com/IgorMirkhanov/ledger-core/internal/transfers/service"
 )
@@ -80,7 +81,7 @@ func (w *Recovery) tick(ctx context.Context) {
 }
 
 func (w *Recovery) note(id uuid.UUID, err error) {
-	workerErrors.WithLabelValues(w.Name()).Inc()
+	metrics.WorkerErrors.WithLabelValues(w.Name()).Inc()
 	args := []any{slog.String("component", w.Name()), slog.Any("error", err)}
 	if id != uuid.Nil {
 		args = append(args, slog.String("transfer_id", id.String()))

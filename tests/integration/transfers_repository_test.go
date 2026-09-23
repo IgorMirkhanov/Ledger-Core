@@ -150,18 +150,57 @@ func TestTransfersRepository_ClaimPendingSkipLocked(t *testing.T) {
 	tx1, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx1.Rollback(context.Background()) })
-	first, err := repo.ClaimPending(ctx, tx1, base, 2)
+	first, err := repo.ClaimPending(ctx, tx1, base, base.Add(10*time.Second), 2)
 	require.NoError(t, err)
-	require.Equal(t, pending[:2], first)
+	require.ElementsMatch(t, pending[:2], first)
 
 	claimCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	tx2, err := pool.Begin(claimCtx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx2.Rollback(context.Background()) })
-	second, err := repo.ClaimPending(claimCtx, tx2, base, 10)
+	second, err := repo.ClaimPending(claimCtx, tx2, base, base.Add(10*time.Second), 10)
 	require.NoError(t, err)
-	require.Equal(t, pending[2:], second)
+	require.ElementsMatch(t, pending[2:], second)
+}
+
+func TestTransfersRepository_ClaimLeaseExpires(t *testing.T) {
+	ctx := testContext(t)
+	pool := testenv.MigratedPool(t, migrations.Transfers())
+	repo := repository.New()
+	usd := mustCurrency(t, "USD")
+	base := time.Now().UTC().Truncate(time.Microsecond)
+
+	pending := make([]uuid.UUID, 0, 3)
+	for i := range 3 {
+		at := base.Add(-time.Duration(3-i) * time.Second)
+		tr, err := domain.NewTransfer(uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()),
+			money.New(100, usd), usd, nil, at)
+		require.NoError(t, err)
+		tr.NextAttemptAt = &at
+		require.NoError(t, repo.Create(ctx, pool, tr))
+		pending = append(pending, tr.ID)
+	}
+
+	lease := base.Add(10 * time.Second)
+	first, err := repo.ClaimPending(ctx, pool, base, lease, 10)
+	require.NoError(t, err)
+	require.ElementsMatch(t, pending, first)
+
+	second, err := repo.ClaimPending(ctx, pool, base, lease, 10)
+	require.NoError(t, err)
+	require.Empty(t, second)
+
+	var version int64
+	require.NoError(t, pool.QueryRow(ctx, `SELECT version FROM transfers WHERE id = $1`, first[0]).Scan(&version))
+	require.Equal(t, int64(0), version)
+	require.NoError(t, repo.Lease(ctx, pool, first[0], lease))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT version FROM transfers WHERE id = $1`, first[0]).Scan(&version))
+	require.Equal(t, int64(0), version)
+
+	again, err := repo.ClaimPending(ctx, pool, lease, lease.Add(10*time.Second), 10)
+	require.NoError(t, err)
+	require.ElementsMatch(t, pending, again)
 }
 
 func TestTransfersRepository_FXRateRoundTrip(t *testing.T) {
