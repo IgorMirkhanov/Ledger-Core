@@ -54,6 +54,11 @@ func New(addr string) (*Client, error) {
 	return newClient(accountsv1.NewAccountsServiceClient(conn), conn), nil
 }
 
+// NewFromAPI builds a client over an existing stub. Tests use it with bufconn.
+func NewFromAPI(api accountsv1.AccountsServiceClient) *Client {
+	return newClient(api, nil)
+}
+
 func newClient(api accountsv1.AccountsServiceClient, conn *grpc.ClientConn) *Client {
 	cb := gobreaker.NewCircuitBreaker[struct{}](gobreaker.Settings{
 		Name:    "accounts",

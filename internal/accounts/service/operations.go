@@ -319,6 +319,9 @@ func (s *Service) CaptureHold(ctx context.Context, cmd CaptureHoldCmd) (*Capture
 		if err := checkOwner(cmd.OwnerID, src); err != nil {
 			return nil, err
 		}
+		if dst.Status != domain.StatusActive {
+			return nil, domain.ErrAccountNotActive
+		}
 		if dst.Currency.Code != cmd.DestAmount.Currency().Code {
 			return nil, domain.ErrCurrencyMismatch
 		}
