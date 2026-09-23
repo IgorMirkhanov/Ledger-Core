@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"errors"
 	"time"
 
@@ -55,6 +54,7 @@ type WithdrawCmd = DepositCmd
 
 type CreateHoldCmd struct {
 	Idem        Idem
+	OwnerID     uuid.UUID // uuid.Nil means an internal caller; owner checks are skipped
 	AccountID   uuid.UUID
 	Amount      money.Money
 	ReferenceID string
@@ -63,6 +63,7 @@ type CreateHoldCmd struct {
 
 type CaptureHoldCmd struct {
 	Idem          Idem
+	OwnerID       uuid.UUID // uuid.Nil means an internal caller; owner checks are skipped
 	HoldID        uuid.UUID
 	DestAccountID uuid.UUID
 	DestAmount    money.Money
@@ -71,9 +72,10 @@ type CaptureHoldCmd struct {
 }
 
 type ReleaseHoldCmd struct {
-	Idem   Idem
-	HoldID uuid.UUID
-	Reason string
+	Idem    Idem
+	OwnerID uuid.UUID // uuid.Nil means an internal caller; owner checks are skipped
+	HoldID  uuid.UUID
+	Reason  string
 }
 
 type EntryResult struct {
@@ -84,47 +86,4 @@ type EntryResult struct {
 type CaptureResult struct {
 	Hold    *domain.Hold
 	EntryID uuid.UUID
-}
-
-// Use cases. Specs: docs/cursor/prompts/05-accounts-service-grpc.md.
-
-func (s *Service) CreateAccount(ctx context.Context, cmd CreateAccountCmd) (*domain.Account, error) {
-	return nil, ErrNotImplemented
-}
-
-func (s *Service) GetAccount(ctx context.Context, owner, id uuid.UUID) (*domain.Account, error) {
-	return nil, ErrNotImplemented
-}
-
-func (s *Service) ListAccounts(ctx context.Context, owner uuid.UUID) ([]*domain.Account, error) {
-	return nil, ErrNotImplemented
-}
-
-func (s *Service) Deposit(ctx context.Context, cmd DepositCmd) (*EntryResult, error) {
-	return nil, ErrNotImplemented
-}
-
-func (s *Service) Withdraw(ctx context.Context, cmd WithdrawCmd) (*EntryResult, error) {
-	return nil, ErrNotImplemented
-}
-
-func (s *Service) CreateHold(ctx context.Context, cmd CreateHoldCmd) (*domain.Hold, error) {
-	return nil, ErrNotImplemented
-}
-
-func (s *Service) CaptureHold(ctx context.Context, cmd CaptureHoldCmd) (*CaptureResult, error) {
-	return nil, ErrNotImplemented
-}
-
-func (s *Service) ReleaseHold(ctx context.Context, cmd ReleaseHoldCmd) (*domain.Hold, error) {
-	return nil, ErrNotImplemented
-}
-
-func (s *Service) Statement(ctx context.Context, owner uuid.UUID, f StatementFilter) ([]StatementLine, error) {
-	return nil, ErrNotImplemented
-}
-
-// ExpireHolds releases expired holds in batches. Called periodically by a worker.
-func (s *Service) ExpireHolds(ctx context.Context, batch int) (int, error) {
-	return 0, ErrNotImplemented
 }
