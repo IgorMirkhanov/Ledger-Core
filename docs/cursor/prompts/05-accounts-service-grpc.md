@@ -16,10 +16,20 @@ tx.WithTx:
   idem.Complete(scope, key, json(result), "OK")
 ```
 - Scope = `"accounts.<Method>"`.
+- **Ключ всегда с пространством имён вызывающего** (`idempotency.Namespace`), иначе ключи разных пользователей
+  сталкиваются в `PK (scope, key)`. Namespacing делает transport, service получает уже готовый `Idem.Key`:
+  - клиентский вызов: `Namespace(ownerID.String(), key)`;
+  - внутренний вызов от transfers: `Namespace("svc:transfers", key)` (ключи вида `transfer:<id>:<step>`).
+- Replay: в `runIdempotent` при `rec != nil` вызови `idempotency.MarkReplayed(ctx)`.
+- `journal_entries.reference_id` для deposit/withdraw — это `Idem.Key` (уже с namespace), `reference_type` — `"deposit"` / `"withdrawal"`.
+  Для capture: `reference_type="transfer"`, `reference_id=cmd.ReferenceID` (transfer_id).
 - Бизнес-ошибки (`INSUFFICIENT_FUNDS` и т.п.) **не** сохраняются как ответ: транзакция откатывается,
   ключ исчезает, клиент может повторить после пополнения. (Задокументируй это поведение в docs/api.md.)
-- Проверка владельца (`CheckOwner`) для клиентских методов. Для `CreateHold/CaptureHold/ReleaseHold` и
-  `GetAccount` с `x-caller=transfers` проверка владельца не выполняется (внутренний вызов; см. ADR-0008).
+- Проверка владельца (`CheckOwner`) для клиентских методов. Внутренний вызов (см. ADR-0008) service узнаёт
+  **только** по `owner == uuid.Nil`; Nil передаёт transport, и только когда `grpcx.Caller(ctx) == "transfers"`
+  и `x-owner-id` не задан. Если `x-owner-id` задан, проверка владельца выполняется даже для transfers
+  (так transfers проверяет, что source принадлежит пользователю). `CreateHold/CaptureHold/ReleaseHold`
+  без `x-caller=transfers` возвращают `PERMISSION_DENIED`.
 - CreateHold: при `ErrHoldReferenceExists` вернуть существующий холд, если amount совпадает, иначе `ErrValidation`.
 - CaptureHold: порядок `Unreserve` → `Apply`. dest.currency должен совпадать с `DestAmount.Currency` → иначе `ErrCurrencyMismatch`.
   Если валюты source и dest различаются — 4 проводки через `fx.<CUR>` (`domain.TransferPostings`).
@@ -33,6 +43,8 @@ tx.WithTx:
 - Подключи в `cmd/accounts/main.go` вместе с `repository.New()` (закрой TODO).
 
 ## Часть C: gRPC (`internal/accounts/transport/grpc.go`)
+- Перед вызовом service: `ctx, replayed := idempotency.WithReplayTracker(ctx)`; после успешного вызова,
+  если `replayed()`, выставь `grpc.SetHeader(ctx, metadata.Pairs("idempotent-replayed", "true"))`.
 - Реализуй все RPC `AccountsServiceServer`: валидация формата (UUID, currency, amount > 0, page_size 1..200) → `domain.ErrValidation`,
   чтение metadata через `grpcx.OwnerID/IdempotencyKey/Caller`, `idempotency.ValidateKey`, `idempotency.HashRequest(req)`,
   вызов service, маппинг domain → proto, ошибки через `grpcx.ToStatus(err, ErrorDomain, Errors)`.
@@ -44,7 +56,9 @@ tx.WithTx:
   бизнес-ошибка не вызывает `Complete`; CaptureHold строит 4 проводки при FX.
 - Integration (`tests/integration/accounts_service_test.go`, реальный PG):
   - Deposit → баланс, выписка, событие в outbox.
-  - Deposit дважды с тем же ключом → одна проводка.
+  - Deposit дважды с тем же ключом → одна проводка, второй ответ помечен replay.
+  - Два разных пользователя с одинаковым ключом `"1"` → обе операции выполнены, `IDEMPOTENCY_KEY_REUSED` нет.
+  - Чужой счёт → `NOT_ACCOUNT_OWNER`; CreateHold без `x-caller=transfers` → `PERMISSION_DENIED`.
   - Withdraw больше доступного → `INSUFFICIENT_FUNDS`, балансы не изменились.
   - Hold → Capture: source −, dest +, held = 0. Hold → Release: доступный остаток восстановлен.
   - Capture истёкшего холда → `HOLD_EXPIRED`. ExpireHolds освобождает резерв.

@@ -106,7 +106,7 @@ FOR UPDATE SKIP LOCKED;
 2. `settlement := GetSystemAccount("settlement", cur)`.
 3. `LockAccounts([account, settlement])`.
 4. Проверки: владелец, валюта, `CanCredit`.
-5. Построить `JournalEntry{kind=deposit, reference_type="deposit", reference_id=key}`,
+5. Построить `JournalEntry{kind=deposit, reference_type="deposit", reference_id=<namespaced key>}`,
    postings `settlement −X`, `account +X`.
 6. `entry.Apply(locked, now)`: валидирует G1, атомарно меняет балансы заблокированных счетов, заполняет `BalanceAfter`.
 7. `InsertEntry`, `UpdateBalances`, `outbox.Add(account.credited)`.

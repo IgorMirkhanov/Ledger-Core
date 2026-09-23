@@ -21,8 +21,8 @@
 (`x-owner-id`, `idempotency-key`, `x-request-id`), deadline `UPSTREAM_TIMEOUT` → encode.
 - Суммы в JSON — строки (`json:",string"` на int64 или отдельные DTO).
 - Ошибки: `grpcToProblem(err)` по таблице маппинга в docs/api.md, `type` = `https://ledger-core.dev/errors/<kebab-code>`.
-- Replay: gRPC-сервисы должны сообщать, что ответ повторный. Добавь в ответ сервисов trailer/header metadata `idempotent-replayed: true`
-  (в accounts/transfers `grpc.SetHeader` при replay) → gateway ставит `Idempotent-Replayed: true`.
+- Replay: accounts/transfers уже выставляют gRPC header `idempotent-replayed: true` (промпты 05–07).
+  Gateway читает его через `grpc.Header(&md)` и ставит HTTP-заголовок `Idempotent-Replayed: true`.
 - `POST /v1/transfers`: 201 для терминального статуса, 202 + `Location: /v1/transfers/{id}` для промежуточного.
 - `POST /v1/dev/token` только при `APP_ENV=local`: `{ "user_id": optional }` → JWT на 24h.
 

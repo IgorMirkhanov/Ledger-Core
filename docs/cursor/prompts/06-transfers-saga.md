@@ -11,7 +11,10 @@
 
 ## 2. Accounts client (`internal/transfers/accountsclient/client.go`)
 Реализует `service.AccountsClient` поверх `accountsv1.AccountsServiceClient`:
-- metadata: `idempotency-key`, `x-caller: transfers`, `x-request-id` из ctx;
+- metadata: `idempotency-key`, `x-caller: transfers`, `x-request-id` из ctx; `x-owner-id` — только в `GetAccountInfo`
+  для source-счёта (accounts проверит владельца). Для dest и для операций с холдами `x-owner-id` не передаётся;
+- ключ идемпотентности `CreateTransfer` в БД transfers: `idempotency.Namespace(ownerID.String(), key)`, replay → `idempotency.MarkReplayed(ctx)`
+  (transport ставит заголовок `idempotent-replayed`, как в accounts);
 - таймаут на вызов 3s (если у ctx нет более раннего deadline);
 - ошибка gRPC с кодом из списка «бизнес-отказ» в `docs/saga.md` → `*service.BusinessError{Code: grpcx.Reason(err)}`; остальное → wrap как транзиентную;
 - circuit breaker `github.com/sony/gobreaker/v2` (открывается после 5 подряд транзиентных, полуоткрыт через 5s) — открытый breaker = транзиентная ошибка;
