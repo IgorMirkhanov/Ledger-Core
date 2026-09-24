@@ -182,7 +182,7 @@ WHERE id=$1 AND version=$N-1;
 | Таблица | Назначение |
 |---------|-----------|
 | `processed_events` | Inbox: `event_id` PK. Вставка и бизнес-действие в одной транзакции |
-| `notifications` | Созданные уведомления (`pending → sent/failed`) |
+| `notifications` | Созданные уведомления (`pending → sent/failed`). Колонка `next_attempt_at` — аренда диспетчера и backoff ретраев |
 
 Обработка события:
 ```sql
@@ -190,10 +190,32 @@ BEGIN;
 INSERT INTO processed_events (event_id, event_type, topic, partition, "offset")
 VALUES (...) ON CONFLICT (event_id) DO NOTHING;
 -- 0 rows → дубль, COMMIT и commit offset
-INSERT INTO notifications (...);
+INSERT INTO notifications (...);  -- next_attempt_at = now()
 COMMIT;
 -- после COMMIT: commit offset в Kafka
 ```
+
+Рассылка (сеть **вне** транзакции, как ClaimPending у transfers):
+```sql
+-- 1. Короткая транзакция: захват с арендой 60s
+UPDATE notifications SET next_attempt_at = now() + interval '60 seconds'
+WHERE id IN (
+    SELECT id FROM notifications
+    WHERE status = 'pending' AND next_attempt_at <= now()
+    ORDER BY next_attempt_at
+    LIMIT $1 FOR UPDATE SKIP LOCKED)
+RETURNING id, ...;
+-- COMMIT — блокировки сняты
+
+-- 2. Send вне транзакции (таймаут 10s). Ключ идемпотентности провайдера = notification.id.
+-- 3. Отдельный UPDATE одной записи:
+--    успех → status='sent', attempts+1
+--    ошибка → attempts+1, next_attempt_at = now() + backoff(attempts)  -- 5s … 10m
+--             после 5 неудач → status='failed'
+```
+
+Доставка at-least-once: падение между Send и UPDATE повторит отправку после истечения аренды;
+провайдер дедуплицирует по `notification.id`.
 
 ---
 
