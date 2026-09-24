@@ -4,6 +4,15 @@
 
 ---
 
+## Окружение для нагрузки
+Gateway ограничивает запросы по IP (`RATE_LIMIT_IP_RPS`, по умолчанию 100/s) и по пользователю (`RATE_LIMIT_RPS`, 50/s).
+k6 бьёт с одного адреса, поэтому с настройками по умолчанию тест измерит rate limiter, а не ledger.
+- `docker-compose.load.yml` (override): `RATE_LIMIT_IP_RPS=100000`, `RATE_LIMIT_RPS=100000`, `LOG_LEVEL=warn`.
+  `make load` поднимает окружение с этим override (`docker compose -f docker-compose.yml -f docker-compose.load.yml up -d`).
+- Отдельный короткий сценарий `rate_limit` на **обычных** настройках: 1 пользователь, 200 rps 10 секунд →
+  доля 429 больше 0, `Retry-After` присутствует. Это доказательство, что лимитер работает, а не отключён навсегда.
+- В `docs/benchmarks.md` явно укажи, что замеры сделаны с отключёнными лимитами.
+
 ## Сделай `tests/load/`
 - `setup.js`: создаёт N=100 пользователей (dev token), по 2 счёта RUB, депозит 1 000 000.00 каждому.
 - `transfers.js` сценарии:

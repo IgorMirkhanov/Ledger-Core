@@ -5,6 +5,7 @@
 ---
 
 ## Chaos (`tests/chaos/`, bash + docker compose)
+Все сценарии запускаются с `docker-compose.load.yml` из промпта 11 (иначе k6 упрётся в rate limit).
 1. `kill_accounts_mid_load.sh`: k6 steady в фоне → `docker compose kill accounts` на 10s → `start` →
    дождаться, пока все переводы станут терминальными (GET по id) → `make reconcile` = 0.
 2. `kill_transfers.sh`: то же для transfers (recovery worker после рестарта доводит переводы).

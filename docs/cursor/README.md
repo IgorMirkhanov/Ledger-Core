@@ -53,6 +53,7 @@ domain-слой). Cursor реализует механику по пошагов
 | 08 | gateway | 05, 07 | публичный REST, `make up` + demo |
 | 08a | gateway-hardening | 08 | исправление по ревью: лимиты, прокси, JSON |
 | 09 | notifications | 02, 05 | уведомления |
+| 09a | dispatcher-xff | 09, 08a | исправление по ревью: отправка вне транзакции, XFF |
 | 10 | reconciler | 05 | сверка |
 | 11 | load-testing | 08 | цифры для README |
 | 12 | chaos-and-polish | всё | финал |
