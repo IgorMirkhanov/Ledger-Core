@@ -1,0 +1,15 @@
+services:
+  gateway:
+    environment:
+      RATE_LIMIT_IP_RPS: "100000"
+      RATE_LIMIT_RPS: "100000"
+      LOG_LEVEL: warn
+  accounts:
+    environment:
+      LOG_LEVEL: warn
+  transfers:
+    environment:
+      LOG_LEVEL: warn
+  notifications:
+    environment:
+      LOG_LEVEL: warn

@@ -5,3 +5,6 @@ coverage.out
 .idea/
 .vscode/
 .DS_Store
+
+tests/load/results/
+

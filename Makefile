@@ -43,6 +43,10 @@ cover: ## Покрытие unit-тестами
 up: ## Поднять всё окружение
 	docker compose up -d --build
 
+.PHONY: up-load
+up-load: ## Окружение с отключёнными rate limit (для k6 / chaos)
+	docker compose -f docker-compose.yml -f docker-compose.load.yml up -d --build
+
 .PHONY: infra
 infra: ## Поднять только инфраструктуру (для go run локально)
 	docker compose up -d postgres redis redpanda redpanda-console jaeger otel-collector prometheus grafana
@@ -64,8 +68,22 @@ reconcile: ## Запустить сверку
 	docker compose run --rm reconciler
 
 .PHONY: load
-load: ## Нагрузочный тест k6
-	k6 run tests/load/transfers.js
+load: ## Нагрузочный тест k6 (без rate limit) + reconcile
+	docker compose -f docker-compose.yml -f docker-compose.load.yml up -d --build \
+		postgres redis redpanda accounts transfers notifications gateway
+	@echo "waiting for gateway..."
+	@i=0; while [ $$i -lt 60 ]; do curl -sf http://localhost:8081/readyz >/dev/null && break; i=$$((i+1)); sleep 2; done
+	k6 run -e SCENARIO=steady tests/load/transfers.js
+	k6 run -e SCENARIO=hot_account tests/load/transfers.js
+	k6 run -e SCENARIO=idempotent_retries tests/load/transfers.js
+	k6 run -e SCENARIO=read_mix tests/load/transfers.js
+	$(MAKE) reconcile
+
+.PHONY: load-rate-limit
+load-rate-limit: ## Короткий тест, что IP-лимит отдаёт 429 (обычные настройки)
+	docker compose up -d --build postgres redis redpanda accounts transfers gateway
+	@i=0; while [ $$i -lt 60 ]; do curl -sf http://localhost:8081/readyz >/dev/null && break; i=$$((i+1)); sleep 2; done
+	k6 run tests/load/rate_limit.js
 
 .PHONY: migration
 migration: ## Новая миграция: make migration svc=accounts name=add_x
