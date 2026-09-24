@@ -49,6 +49,15 @@ func run() error {
 	log := logger.New(cfg.ServiceName, cfg.LogLevel)
 	slog.SetDefault(log)
 
+	if err := config.CheckProd(cfg.Base,
+		config.Unsafe(len(cfg.JWTSecret) < 32 || cfg.JWTSecret == "local-dev-secret-change-me",
+			"JWT_SECRET must be at least 32 random bytes and not the local default"),
+		config.Unsafe(cfg.RateLimitRPS > 10000 || cfg.RateLimitIPRPS > 10000,
+			"rate limits look disabled (load-test override?)"),
+	); err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	shutdownTrace, err := observability.InitTracing(ctx, cfg.ServiceName, cfg.OTLPEndpoint)
 	if err != nil {

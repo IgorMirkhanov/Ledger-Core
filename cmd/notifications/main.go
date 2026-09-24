@@ -41,6 +41,10 @@ func run() error {
 	slog.SetDefault(log)
 	ctx := context.Background()
 
+	if err := config.CheckProd(cfg.Base, config.CommonProdProblems(cfg.Postgres, cfg.Kafka, nil)...); err != nil {
+		return err
+	}
+
 	shutdownTrace, err := observability.InitTracing(ctx, cfg.ServiceName, cfg.OTLPEndpoint)
 	if err != nil {
 		return err
@@ -50,14 +54,19 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if cfg.Postgres.MigrateOnStart {
+	if cfg.Postgres.MigrateOnStart || cfg.Postgres.MigrateOnly {
 		if err := postgres.Migrate(ctx, pool, migrations.Notifications()); err != nil {
 			return err
 		}
 	}
+	if cfg.Postgres.MigrateOnly {
+		log.Info("migrations applied, exiting (MIGRATE_ONLY)")
+		pool.Close()
+		return shutdownTrace(ctx)
+	}
 
 	// Producer is used only for readiness ping (consumer has no separate Ping).
-	pinger, err := kafka.NewProducer(cfg.Kafka.Brokers, cfg.ServiceName+"-ready")
+	pinger, err := kafka.NewProducer(cfg.Kafka.Brokers, cfg.ServiceName+"-ready", kafka.WithAutoCreateTopics(cfg.Kafka.AutoCreateTopics))
 	if err != nil {
 		return err
 	}

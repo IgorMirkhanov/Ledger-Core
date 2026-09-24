@@ -71,7 +71,8 @@ type Server struct {
 // failing in-flight RPCs with UNAVAILABLE. It must stay <= ClientKeepaliveTime.
 const serverKeepaliveMinTime = 10 * time.Second
 
-// NewServer creates a server with recovery + logging + metrics interceptors, health and reflection.
+// NewServer creates a server with recovery + logging + metrics interceptors and health.
+// Reflection is opt-in via EnableReflection (local tooling such as grpcurl).
 func NewServer(addr string, log *slog.Logger, extra ...grpc.ServerOption) *Server {
 	opts := append([]grpc.ServerOption{
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
@@ -88,9 +89,11 @@ func NewServer(addr string, log *slog.Logger, extra ...grpc.ServerOption) *Serve
 	s := grpc.NewServer(opts...)
 	h := health.NewServer()
 	healthpb.RegisterHealthServer(s, h)
-	reflection.Register(s)
 	return &Server{srv: s, health: h, addr: addr, log: log}
 }
+
+// EnableReflection registers the reflection service. Call before Run.
+func (s *Server) EnableReflection() { reflection.Register(s.srv) }
 
 // Registrar exposes the underlying server for service registration.
 func (s *Server) Registrar() grpc.ServiceRegistrar { return s.srv }

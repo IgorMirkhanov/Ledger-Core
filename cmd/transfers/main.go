@@ -56,6 +56,10 @@ func run() error {
 	slog.SetDefault(log)
 	ctx := context.Background()
 
+	if err := config.CheckProd(cfg.Base, config.CommonProdProblems(cfg.Postgres, cfg.Kafka, &cfg.GRPC)...); err != nil {
+		return err
+	}
+
 	shutdownTrace, err := observability.InitTracing(ctx, cfg.ServiceName, cfg.OTLPEndpoint)
 	if err != nil {
 		return err
@@ -65,12 +69,17 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if cfg.Postgres.MigrateOnStart {
+	if cfg.Postgres.MigrateOnStart || cfg.Postgres.MigrateOnly {
 		if err := postgres.Migrate(ctx, pool, migrations.Transfers()); err != nil {
 			return err
 		}
 	}
-	producer, err := kafka.NewProducer(cfg.Kafka.Brokers, cfg.ServiceName)
+	if cfg.Postgres.MigrateOnly {
+		log.Info("migrations applied, exiting (MIGRATE_ONLY)")
+		pool.Close()
+		return shutdownTrace(ctx)
+	}
+	producer, err := kafka.NewProducer(cfg.Kafka.Brokers, cfg.ServiceName, kafka.WithAutoCreateTopics(cfg.Kafka.AutoCreateTopics))
 	if err != nil {
 		return err
 	}
@@ -83,6 +92,9 @@ func run() error {
 		outbox.NewWriter(cfg.ServiceName), accounts, clock{})
 
 	grpcSrv := grpcx.NewServer(cfg.GRPC.Addr, log)
+	if cfg.GRPC.Reflection {
+		grpcSrv.EnableReflection()
+	}
 	transfersv1.RegisterTransfersServiceServer(grpcSrv.Registrar(), transport.NewHandler(svc))
 
 	admin := httpx.NewServer("admin", cfg.AdminAddr, httpx.AdminHandler(

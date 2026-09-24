@@ -16,15 +16,32 @@ type Producer struct {
 	client *kgo.Client
 }
 
-func NewProducer(brokers []string, clientID string) (*Producer, error) {
-	cl, err := kgo.NewClient(
+// ProducerOption tweaks the producer client.
+type ProducerOption func(*producerConfig)
+
+type producerConfig struct{ autoCreateTopics bool }
+
+// WithAutoCreateTopics toggles broker-side topic auto-creation (default on for local development).
+func WithAutoCreateTopics(on bool) ProducerOption {
+	return func(c *producerConfig) { c.autoCreateTopics = on }
+}
+
+func NewProducer(brokers []string, clientID string, opts ...ProducerOption) (*Producer, error) {
+	pc := producerConfig{autoCreateTopics: true}
+	for _, o := range opts {
+		o(&pc)
+	}
+	kopts := []kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.ClientID(clientID),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
 		kgo.ProducerBatchCompression(kgo.ZstdCompression()),
-		kgo.AllowAutoTopicCreation(),
 		// Idempotent producer is on by default in franz-go when acks=all.
-	)
+	}
+	if pc.autoCreateTopics {
+		kopts = append(kopts, kgo.AllowAutoTopicCreation())
+	}
+	cl, err := kgo.NewClient(kopts...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka: new producer: %w", err)
 	}
