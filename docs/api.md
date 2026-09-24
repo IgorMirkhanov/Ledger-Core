@@ -12,7 +12,7 @@ OpenAPI-спецификация: `api/openapi.yaml` (создаётся в prom
 | Повтор | Тот же ключ и то же тело: тот же ответ + заголовок `Idempotent-Replayed: true`. Тот же ключ и другое тело: `422 IDEMPOTENCY_KEY_REUSED`. Бизнес-отказ (`INSUFFICIENT_FUNDS` и остальные доменные ошибки) откатывает транзакцию вместе с ключом: ответ не сохраняется, тот же ключ можно повторить, когда условие выполнено |
 | Суммы | Строка с целым числом минорных единиц: `"amount": "10050"` = 100.50 RUB. Причина: JS теряет точность на int64 |
 | Трассировка | `X-Request-Id` принимается или генерируется, возвращается в ответе; `traceparent` поддерживается |
-| Rate limit | На пользователя (или IP без токена): `RATE_LIMIT_RPS`. Превышение: `429` + `Retry-After` |
+| Rate limit | `RATE_LIMIT_IP_RPS` по IP **до** Auth; `RATE_LIMIT_RPS` по пользователю после Auth. Превышение: `429` + `Retry-After`. IP берётся из `RemoteAddr`; `X-Forwarded-For` учитывается только если `RemoteAddr` в `TRUSTED_PROXY_CIDRS` (разбор цепочки справа налево) |
 | Таймаут | Deadline на downstream-вызовы: `UPSTREAM_TIMEOUT` (5s) |
 
 ## Эндпоинты
@@ -54,6 +54,11 @@ Idempotency-Key: 7a1d...
 ```json
 201 Created
 {"id":"0194...","status":"completed","amount":"10000","currency":"USD","dest_amount":"900000","dest_currency":"RUB","fx_rate":"90","created_at":"...","completed_at":"..."}
+```
+
+```json
+200 OK — GET /v1/accounts/{id}/statement
+{"lines":[{"posting_id":"42","entry_id":"0195...","kind":"transfer","amount":"900000","balance_after":"900000","description":"...","created_at":"..."}],"next_page_token":""}
 ```
 
 ```json

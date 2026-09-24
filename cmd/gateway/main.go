@@ -22,13 +22,15 @@ import (
 
 type Config struct {
 	config.Base
-	HTTPAddr      string        `env:"HTTP_ADDR" envDefault:":8080"`
-	AccountsAddr  string        `env:"ACCOUNTS_GRPC_ADDR,required"`
-	TransfersAddr string        `env:"TRANSFERS_GRPC_ADDR,required"`
-	RedisAddr     string        `env:"REDIS_ADDR,required"`
-	JWTSecret     string        `env:"JWT_SECRET,required"`
-	RateLimitRPS  int           `env:"RATE_LIMIT_RPS" envDefault:"50"`
-	UpstreamTTL   time.Duration `env:"UPSTREAM_TIMEOUT" envDefault:"5s"`
+	HTTPAddr          string        `env:"HTTP_ADDR" envDefault:":8080"`
+	AccountsAddr      string        `env:"ACCOUNTS_GRPC_ADDR,required"`
+	TransfersAddr     string        `env:"TRANSFERS_GRPC_ADDR,required"`
+	RedisAddr         string        `env:"REDIS_ADDR,required"`
+	JWTSecret         string        `env:"JWT_SECRET,required"`
+	RateLimitRPS      int           `env:"RATE_LIMIT_RPS" envDefault:"50"`
+	RateLimitIPRPS    int           `env:"RATE_LIMIT_IP_RPS" envDefault:"100"`
+	TrustedProxyCIDRs string        `env:"TRUSTED_PROXY_CIDRS"`
+	UpstreamTTL       time.Duration `env:"UPSTREAM_TIMEOUT" envDefault:"5s"`
 }
 
 func main() {
@@ -55,6 +57,10 @@ func run() error {
 		return err
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
+	trusted, err := gateway.ParseTrustedProxies(cfg.TrustedProxyCIDRs)
+	if err != nil {
+		return fmt.Errorf("TRUSTED_PROXY_CIDRS: %w", err)
+	}
 
 	api := &gateway.API{
 		Accounts:  accountsv1.NewAccountsServiceClient(accountsConn),
@@ -64,12 +70,14 @@ func run() error {
 		AppEnv:    cfg.Env,
 	}
 	router := gateway.NewRouter(gateway.Options{
-		API:         api,
-		Redis:       rdb,
-		RateLimit:   cfg.RateLimitRPS,
-		JWTSecret:   []byte(cfg.JWTSecret),
-		AppEnv:      cfg.Env,
-		UpstreamTTL: cfg.UpstreamTTL,
+		API:            api,
+		Redis:          rdb,
+		RateLimitRPS:   cfg.RateLimitRPS,
+		RateLimitIP:    cfg.RateLimitIPRPS,
+		TrustedProxies: trusted,
+		JWTSecret:      []byte(cfg.JWTSecret),
+		AppEnv:         cfg.Env,
+		UpstreamTTL:    cfg.UpstreamTTL,
 	})
 
 	accountsHealth := healthpb.NewHealthClient(accountsConn)

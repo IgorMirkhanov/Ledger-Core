@@ -10,15 +10,18 @@ import (
 
 // Options configures the public API router.
 type Options struct {
-	API         *API
-	Redis       *redis.Client
-	RateLimit   int
-	JWTSecret   []byte
-	AppEnv      string
-	UpstreamTTL time.Duration
+	API            *API
+	Redis          *redis.Client
+	RateLimitRPS   int
+	RateLimitIP    int
+	TrustedProxies *TrustedProxies
+	JWTSecret      []byte
+	AppEnv         string
+	UpstreamTTL    time.Duration
 }
 
 // NewRouter builds the chi router with middleware in the documented order.
+// Order: RequestID → Recoverer → AccessLog → RateLimitIP → Auth → RateLimitUser → …
 func NewRouter(opt Options) http.Handler {
 	api := opt.API
 	if api == nil {
@@ -33,9 +36,12 @@ func NewRouter(opt Options) http.Handler {
 	r.Use(RequestIDMiddleware)
 	r.Use(Recoverer)
 	r.Use(AccessLog)
+	if opt.Redis != nil {
+		r.Use(RateLimitIP(opt.Redis, opt.RateLimitIP, opt.TrustedProxies))
+	}
 	r.Use(Auth(opt.JWTSecret, "/v1/dev/token"))
 	if opt.Redis != nil {
-		r.Use(RateLimit(opt.Redis, opt.RateLimit))
+		r.Use(RateLimitUser(opt.Redis, opt.RateLimitRPS))
 	}
 	r.Use(RequireIdempotencyKey)
 	r.Use(MaxBody(64 << 10))
