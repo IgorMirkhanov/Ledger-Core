@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/IgorMirkhanov/ledger-core/internal/notifications"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/app"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/config"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/httpx"
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/kafka"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/logger"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/postgres"
 	"github.com/IgorMirkhanov/ledger-core/migrations"
@@ -48,11 +50,37 @@ func run() error {
 		}
 	}
 
+	// Producer is used only for readiness ping (consumer has no separate Ping).
+	pinger, err := kafka.NewProducer(cfg.Kafka.Brokers, cfg.ServiceName+"-ready")
+	if err != nil {
+		return err
+	}
+
+	handler := notifications.NewHandler(pool)
+	consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
+		Brokers:     cfg.Kafka.Brokers,
+		Group:       cfg.ConsumerGroup,
+		Topics:      []string{"ledger.accounts.v1", "ledger.transfers.v1"},
+		MaxAttempts: cfg.MaxAttempts,
+		DLQTopic:    "ledger.notifications.dlq",
+	}, handler.Handle, log)
+	if err != nil {
+		return err
+	}
+
+	dispatcher, err := notifications.NewDispatcher(pool, notifications.NewLogSender(log), log)
+	if err != nil {
+		return err
+	}
+
 	a := app.New(log, cfg.ShutdownTimeout)
 	a.Go(httpx.NewServer("admin", cfg.AdminAddr, httpx.AdminHandler(
 		httpx.ReadinessCheck{Name: "postgres", Check: pool.Ping},
+		httpx.ReadinessCheck{Name: "kafka", Check: pinger.Ping},
 	), log))
-	// TODO(prompt-09): a.Go(consumer) — internal/notifications.
+	a.Go(consumer)
+	a.Go(dispatcher)
+	a.OnShutdown("kafka-ready", pinger.Close)
 	a.OnShutdown("postgres", func(context.Context) error { pool.Close(); return nil })
 	return a.Run(ctx)
 }
