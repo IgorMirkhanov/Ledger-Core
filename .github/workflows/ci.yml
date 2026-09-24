@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
+        with: { go-version: "1.26.8" } # keep in sync with the toolchain directive in go.mod
       - uses: golangci/golangci-lint-action@v8
         with: { version: v2.13.2 }
 
@@ -30,13 +30,14 @@ jobs:
           breaking: false
           breaking_against: "https://github.com/${{ github.repository }}.git#branch=main"
           push: false
+          pr_comment: false # the workflow token is read-only
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
+        with: { go-version: "1.26.8" } # keep in sync with the toolchain directive in go.mod
       - name: Unit tests (race + coverage)
         run: go test -race -count=1 -coverprofile=coverage.out ./internal/...
       - name: Coverage report + gate (core packages ≥70%)

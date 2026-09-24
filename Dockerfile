@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Один Dockerfile на все сервисы: docker build --build-arg SERVICE=accounts .
-FROM golang:1.26-alpine AS build
+FROM golang:1.26.8-alpine AS build
 ARG SERVICE
 WORKDIR /src
 COPY go.mod go.sum ./

@@ -2,6 +2,8 @@ module github.com/IgorMirkhanov/ledger-core
 
 go 1.26.0
 
+toolchain go1.26.8
+
 require (
 	github.com/alicebob/miniredis/v2 v2.39.0
 	github.com/caarlos0/env/v11 v11.4.1
@@ -27,7 +29,8 @@ require (
 	go.opentelemetry.io/otel/trace v1.46.0
 	golang.org/x/sync v0.23.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260921155816-b14227669459
-	google.golang.org/grpc v1.84.0
+	// Pinned to the fix for GO-2026-6443 (server panic on missing :authority). Move to v1.85.0 once released.
+	google.golang.org/grpc v1.85.0-dev.0.20260825072537-93e31b48545e
 	google.golang.org/protobuf v1.36.12
 )
 
