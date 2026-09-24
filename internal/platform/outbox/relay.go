@@ -22,6 +22,8 @@ type Message struct {
 	Key     []byte
 	Value   []byte
 	Headers map[string]string
+	// CreatedAt is when the business transaction wrote the event (for outbox_publish_lag_seconds).
+	CreatedAt time.Time
 }
 
 // Publisher publishes a batch synchronously (acks=all). It must return an error if ANY message failed.
@@ -131,7 +133,7 @@ func (r *Relay) publishBatch(ctx context.Context) (int, error) {
 	)
 	err := postgres.NewTxManager(r.pool).WithTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT id, topic, aggregate_id, payload, headers
+			SELECT id, topic, aggregate_id, payload, headers, created_at
 			FROM outbox
 			WHERE published_at IS NULL
 			ORDER BY id
@@ -146,7 +148,7 @@ func (r *Relay) publishBatch(ctx context.Context) (int, error) {
 				key     string
 				headers []byte
 			)
-			if err := row.Scan(&m.ID, &m.Topic, &key, &m.Value, &headers); err != nil {
+			if err := row.Scan(&m.ID, &m.Topic, &key, &m.Value, &headers, &m.CreatedAt); err != nil {
 				return m, err
 			}
 			m.Key = []byte(key)
@@ -174,6 +176,10 @@ func (r *Relay) publishBatch(ctx context.Context) (int, error) {
 			return fmt.Errorf("mark published: %w", err)
 		}
 		published = len(msgs)
+		now := time.Now()
+		for _, m := range msgs {
+			observability.OutboxPublishLag.WithLabelValues(r.cfg.ServiceName).Observe(now.Sub(m.CreatedAt).Seconds())
+		}
 		return nil
 	})
 	if len(failedIDs) > 0 {

@@ -4,11 +4,13 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/logger"
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/observability"
 )
 
 // Recoverer turns panics into 500 problem+json.
@@ -47,5 +49,22 @@ func AccessLog(next http.Handler) http.Handler {
 			attrs = append(attrs, slog.String("user_id", uid.String()))
 		}
 		logger.FromContext(r.Context()).Info("http", attrs...)
+	})
+}
+
+// Metrics records http_requests_total and http_request_duration_seconds by route pattern.
+// It runs before Auth and the rate limiters so 401 and 429 are counted too.
+// Unmatched paths share one label value: raw URLs would let any scanner explode label cardinality.
+func Metrics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		route := "unmatched"
+		if rc := chi.RouteContext(r.Context()); rc != nil && rc.RoutePattern() != "" {
+			route = rc.RoutePattern()
+		}
+		observability.HTTPRequests.WithLabelValues(route, r.Method, strconv.Itoa(rec.status)).Inc()
+		observability.HTTPDuration.WithLabelValues(route, r.Method).Observe(time.Since(start).Seconds())
 	})
 }

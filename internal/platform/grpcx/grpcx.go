@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -175,7 +176,7 @@ func MetricsInterceptor(service string) grpc.UnaryServerInterceptor {
 		code := status.Code(err)
 		svc := service
 		if svc == "" {
-			svc = "unknown"
+			svc = serviceFromMethod(info.FullMethod)
 		}
 		observability.RPCRequests.WithLabelValues(svc, info.FullMethod, code.String()).Inc()
 		observability.RPCDuration.WithLabelValues(svc, info.FullMethod).Observe(time.Since(start).Seconds())
@@ -239,4 +240,14 @@ func IsTransient(err error) bool {
 		return true
 	}
 	return false
+}
+
+// serviceFromMethod returns "ledger.transfers.v1.TransfersService" for
+// "/ledger.transfers.v1.TransfersService/CreateTransfer", or "unknown".
+func serviceFromMethod(fullMethod string) string {
+	name := strings.TrimPrefix(fullMethod, "/")
+	if i := strings.LastIndex(name, "/"); i > 0 {
+		return name[:i]
+	}
+	return "unknown"
 }

@@ -235,6 +235,7 @@ func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) (bool, er
 		}
 		err := c.invoke(ctx, msg)
 		if err == nil {
+			observability.KafkaConsumerMessages.WithLabelValues(rec.Topic, "ok").Inc()
 			return true, nil
 		}
 		if ctx.Err() != nil {
@@ -257,6 +258,7 @@ func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) (bool, er
 			slog.Int("attempt", attempt),
 			slog.Any("error", err),
 		)
+		observability.KafkaConsumerMessages.WithLabelValues(rec.Topic, "retry").Inc()
 		if err := pause(ctx, c.cfg.RetryBackoff(attempt)); err != nil {
 			return false, errShutdown
 		}
@@ -301,6 +303,7 @@ func (c *Consumer) publishDLQ(ctx context.Context, rec *kgo.Record, cause error,
 	if err := c.cl.ProduceSync(pubCtx, out).FirstErr(); err != nil {
 		return fmt.Errorf("kafka: dlq publish: %w", err)
 	}
+	observability.KafkaConsumerMessages.WithLabelValues(rec.Topic, "dlq").Inc()
 	c.log.Warn("record sent to dlq",
 		slog.String("topic", rec.Topic),
 		slog.Int64("offset", rec.Offset),

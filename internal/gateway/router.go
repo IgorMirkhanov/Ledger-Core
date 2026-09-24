@@ -34,6 +34,7 @@ func NewRouter(opt Options) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(RequestIDMiddleware)
+	r.Use(Metrics) // outside Recoverer so panics are counted as 500
 	r.Use(Recoverer)
 	r.Use(AccessLog)
 	if opt.Redis != nil {
