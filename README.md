@@ -72,7 +72,7 @@ demo ok: RUB=… USD=…
 
 ## Нагрузка (кратко)
 
-На ноутбуке с Docker Desktop (лимиты **отключены**): ~190 transfers/s, p50≈1s, **0% ошибок**,
+На ноутбуке с Docker Desktop (лимиты **отключены**): ~100 transfers/s, p50≈1.6s, **0% ошибок** на steady,
 reconciler **0** расхождений. Подробности и сценарии chaos: [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Документация

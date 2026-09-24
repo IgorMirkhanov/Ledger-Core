@@ -22,13 +22,13 @@ Observability sidecars (Grafana/Prometheus/Jaeger/otel) were not required for th
 | Metric | Value |
 |--------|-------|
 | Target arrival rate | 300 transfers/s |
-| Completed iterations | ~35 000 |
-| Dropped iterations (insufficient VUs / latency) | ~19 000 |
-| Effective throughput | ~190 req/s |
+| Completed iterations | ~20 000 |
+| Dropped iterations (insufficient VUs / latency) | ~34 000 |
+| Effective throughput | ~104 req/s |
 | Errors (`http_req_failed`) | **0%** |
-| POST /transfers p50 | ~990 ms |
-| POST /transfers p95 | ~1.26 s |
-| POST /transfers p99 | ~1.61 s |
+| POST /transfers p50 | ~1.60 s |
+| POST /transfers p95 | ~3.30 s |
+| POST /transfers p99 | ~3.96 s |
 | Threshold `p(99)<300ms` | **not met** on this laptop/Docker setup |
 | `make reconcile` after run | **0 discrepancies** |
 
@@ -36,10 +36,10 @@ Observability sidecars (Grafana/Prometheus/Jaeger/otel) were not required for th
 
 | Metric | Value |
 |--------|-------|
-| Errors | 0% |
-| POST /transfers p50 | ~1.21 s |
-| POST /transfers p95 | ~1.91 s |
-| Notes | Higher tail latency: row locks on the hot destination account |
+| Errors | ~30% (timeouts / contention under Docker Desktop) |
+| POST /transfers p50 | ~1.45 s |
+| POST /transfers p95 | ~3.24 s |
+| Notes | Hot destination serializes on `SELECT … FOR UPDATE`; tail latency and failures rise vs steady |
 
 ### idempotent_retries — 50 rps, 1 minute
 
@@ -47,29 +47,29 @@ Observability sidecars (Grafana/Prometheus/Jaeger/otel) were not required for th
 |--------|-------|
 | Errors | 0% |
 | Idempotent replay checks | 100% pass (same `id` / status) |
-| POST /transfers p95 | ~108 ms |
+| POST /transfers p95 | ~728 ms |
 
 ### read_mix — 200 rps, 1 minute (70% GET / 30% POST)
 
 | Metric | Value |
 |--------|-------|
-| Errors | 0% |
-| Overall p95 | ~93 ms |
-| POST /transfers p95 | ~114 ms |
+| Errors | ~5.6% (mostly POST under residual load) |
+| Overall p95 | ~455 ms |
+| POST /transfers p95 | ~1.71 s |
 
 ### rate_limit — default limits, 200 rps, 10 seconds
 
 | Metric | Value |
 |--------|-------|
-| 429 responses | 802 |
+| 429 responses | 801 |
 | `Retry-After` present | yes |
 | Threshold `rate_limited count>0` | **pass** |
 
 ## Conclusions
 
-1. **Correctness under load:** zero HTTP failures on transfer scenarios; reconciler reported **0** ledger discrepancies after the heavy steady run.
-2. **Throughput ceiling on this machine:** ~190 sustained transfers/s with p50≈1 s — the 300 rps aspirational target and `p99<300ms` threshold are goals for a beefier deployment (more CPU for Go services / Postgres, connection pools, less Docker desktop overhead), not what a single laptop Docker stack delivers.
-3. **Hot account:** contention shows up as longer p95/p99 when 80% of credits hit one account (`SELECT … FOR UPDATE` serialization).
+1. **Correctness under load:** steady transfers finished with **0%** HTTP failures; reconciler reported **0** ledger discrepancies after the heavy run.
+2. **Throughput ceiling on this machine:** ~100 sustained transfers/s with p50≈1.6 s — the 300 rps aspirational target and `p99<300ms` threshold are goals for a beefier deployment (more CPU for Go services / Postgres, connection pools, less Docker desktop overhead), not what a single laptop Docker stack delivers.
+3. **Hot account:** contention shows up as longer p95/p99 and elevated errors when 80% of credits hit one account (`SELECT … FOR UPDATE` serialization).
 4. **Idempotency:** replays with the same key return the same transfer id under concurrent load.
 5. **Rate limiter:** with default `RATE_LIMIT_IP_RPS`, junk-token bursts correctly receive **429** + `Retry-After`; load/chaos must keep using `docker-compose.load.yml`.
 
@@ -94,12 +94,12 @@ Or `make load` / `make load-rate-limit` (requires `k6` on `PATH`).
 Scripts under `tests/chaos/` exercise failure recovery with the same load compose overlay
 (`docker-compose.yml` + `docker-compose.load.yml`). Each script prints **PASS** or **FAIL**.
 
-| Scenario | Script | Expected outcome |
-|----------|--------|------------------|
-| Kill accounts mid-load | `kill_accounts_mid_load.sh` | k6 steady briefly; accounts killed ~10s then started; seeded transfers reach `completed`/`failed`; `reconcile` = 0 discrepancies |
-| Kill transfers mid-load | `kill_transfers.sh` | Same pattern for transfers; recovery worker advances in-flight sagas after restart; money consistent |
-| Kafka / Redpanda down | `kafka_down.sh` | Transfer create still works while Redpanda is stopped; `outbox` pending rows grow; after start, pending drains to 0; reconcile clean |
-| Postgres restart | `postgres_restart.sh` | Admin `/readyz` briefly 503 then 200; pre-created account balance unchanged; new transfer + reconcile succeed |
+| Scenario | Script | Result (2026-09-24) | Expected outcome |
+|----------|--------|---------------------|------------------|
+| Kill accounts mid-load | `kill_accounts_mid_load.sh` | **PASS** | k6 steady briefly; accounts killed ~10s then started; seeded transfers reach `completed`/`failed`; `reconcile` = 0 discrepancies |
+| Kill transfers mid-load | `kill_transfers.sh` | **PASS** | Same pattern for transfers; recovery worker advances in-flight sagas after restart; money consistent |
+| Kafka / Redpanda down | `kafka_down.sh` | **PASS** | Transfer create still works while Redpanda is stopped; `outbox` pending rows grow; after start, pending drains to 0; reconcile clean |
+| Postgres restart | `postgres_restart.sh` | **PASS** | Admin `/readyz` briefly 503 then 200; pre-created account balance unchanged; new transfer + reconcile succeed |
 
 **PASS criterion:** ledger money stays consistent (G1/G2/G9 via reconciler) and every observed transfer reaches a terminal status. Transient HTTP/gRPC errors during the outage window are expected; lost money or stuck non-terminal transfers are not.
 
