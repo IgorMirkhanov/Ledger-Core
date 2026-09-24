@@ -12,18 +12,24 @@ import (
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/config"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/logger"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/postgres"
+	"github.com/IgorMirkhanov/ledger-core/internal/reconciler"
 )
 
 type Config struct {
 	config.Base
-	Postgres config.Postgres // read-only DSN to the accounts database
+	Postgres       config.Postgres // DSN to the accounts database (writes only reconciliation_*)
+	PushgatewayURL string          `env:"PUSHGATEWAY_URL"`
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	cfg, err := config.Load[Config]()
 	if err != nil {
 		slog.Error("config", slog.Any("error", err))
-		os.Exit(1)
+		return 1
 	}
 	log := logger.New(cfg.ServiceName, cfg.LogLevel)
 	ctx := context.Background()
@@ -31,10 +37,20 @@ func main() {
 	pool, err := postgres.NewPool(ctx, cfg.Postgres)
 	if err != nil {
 		log.Error("postgres", slog.Any("error", err))
-		os.Exit(1)
+		return 1
 	}
 	defer pool.Close()
 
-	// TODO(prompt-10): internal/reconciler.Run(ctx, pool) → report; os.Exit(2) if discrepancies.
-	log.Info("reconciler is not implemented yet")
+	res, err := reconciler.Run(ctx, pool, reconciler.DefaultChecks(), log)
+	if err != nil {
+		log.Error("reconciler failed", slog.Any("error", err))
+		return 1
+	}
+	if err := reconciler.PushMetrics(ctx, cfg.PushgatewayURL, cfg.ServiceName, res); err != nil {
+		log.Warn("pushgateway", slog.Any("error", err))
+	}
+	if res.Status == "discrepancies" {
+		return 2
+	}
+	return 0
 }
