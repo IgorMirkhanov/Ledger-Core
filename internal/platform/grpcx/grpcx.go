@@ -80,6 +80,11 @@ func NewServer(addr string, log *slog.Logger, extra ...grpc.ServerOption) *Serve
 			MinTime:             serverKeepaliveMinTime,
 			PermitWithoutStream: true,
 		}),
+		// Recycle connections so clients re-resolve DNS and discover new replicas after scale-out.
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionAge:      5 * time.Minute,
+			MaxConnectionAgeGrace: 30 * time.Second,
+		}),
 		grpc.ChainUnaryInterceptor(
 			RecoveryInterceptor(log),
 			LoggingInterceptor(log),

@@ -15,6 +15,12 @@ import (
 // Servers must allow it: see serverKeepaliveMinTime in grpcx.go.
 const ClientKeepaliveTime = 20 * time.Second
 
+// roundRobin spreads RPCs over every address the resolver returns. With the default
+// pick_first a client pins one long-lived connection to a single pod, so extra replicas
+// behind a Kubernetes Service receive no traffic. Pair it with a headless Service
+// (dns:///svc-headless:9090) so DNS returns every pod.
+const roundRobin = `{"loadBalancingConfig":[{"round_robin":{}}]}`
+
 // Dial opens a client connection with insecure transport and keepalive.
 // addr may be "host:port" (wrapped as dns:///) or a full target URI.
 func Dial(addr string, extra ...grpc.DialOption) (*grpc.ClientConn, error) {
@@ -24,6 +30,7 @@ func Dial(addr string, extra ...grpc.DialOption) (*grpc.ClientConn, error) {
 	}
 	opts := append([]grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultServiceConfig(roundRobin),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                ClientKeepaliveTime,
