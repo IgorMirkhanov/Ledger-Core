@@ -37,7 +37,7 @@ func TestGateway_MetadataIgnoresClientSpoofing(t *testing.T) {
 		AppEnv:    "local",
 	})
 	body := `{"currency":"USD"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/accounts", bytes.NewBufferString(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/accounts", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Idempotency-Key", "k1")
 	req.Header.Set("Content-Type", "application/json")
@@ -72,7 +72,7 @@ func TestGateway_AmountMustBePositiveString(t *testing.T) {
 		`{"amount":" 5","currency":"USD"}`,
 	}
 	for _, body := range cases {
-		req := httptest.NewRequest(http.MethodPost, "/v1/accounts/"+uuid.Must(uuid.NewV7()).String()+"/deposits", bytes.NewBufferString(body))
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/accounts/"+uuid.Must(uuid.NewV7()).String()+"/deposits", bytes.NewBufferString(body))
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Idempotency-Key", uuid.Must(uuid.NewV7()).String())
 		req.Header.Set("Content-Type", "application/json")
@@ -87,7 +87,7 @@ func TestGateway_AmountMustBePositiveString(t *testing.T) {
 
 func TestGateway_Unauthorized(t *testing.T) {
 	h := gateway.NewRouter(gateway.Options{JWTSecret: []byte("s"), AppEnv: "local"})
-	req := httptest.NewRequest(http.MethodGet, "/v1/accounts", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/accounts", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
@@ -110,7 +110,7 @@ func TestGateway_RateLimitAndFailOpen(t *testing.T) {
 		AppEnv:    "local",
 	})
 	do := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/v1/accounts", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/accounts", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -130,7 +130,7 @@ func TestGateway_RateLimitAndFailOpen(t *testing.T) {
 		JWTSecret: secret,
 		AppEnv:    "local",
 	})
-	req := httptest.NewRequest(http.MethodGet, "/v1/accounts", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/accounts", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	failOpen.ServeHTTP(rec, req)
@@ -149,7 +149,7 @@ func TestGateway_GrpcErrorMapping(t *testing.T) {
 		JWTSecret: secret,
 		AppEnv:    "local",
 	})
-	req := httptest.NewRequest(http.MethodGet, "/v1/accounts/"+uuid.Must(uuid.NewV7()).String(), nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/accounts/"+uuid.Must(uuid.NewV7()).String(), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
