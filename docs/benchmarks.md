@@ -89,6 +89,40 @@ k6 run tests/load/rate_limit.js
 
 Or `make load` / `make load-rate-limit` (requires `k6` on `PATH`).
 
+## Native Linux baseline (no Docker Desktop)
+
+To separate code limits from the laptop/Docker Desktop environment, the same stack was run natively on one
+Linux VM: **4 vCPU, 15 GB RAM**, Postgres 16, Redis, `accounts` + `transfers` + `gateway` binaries and the load
+generator all on the same machine (Kafka absent: the outbox accumulates, which does not affect the request path).
+Rate limits disabled. Generator: `tests/load/gobench` (closed loop: a fixed number of requests in flight).
+Each user owns two funded RUB accounts; transfers go between them in both directions.
+
+| In flight | Transfers/s | p50 | p95 | p99 | Result |
+|-----------|-------------|-----|-----|-----|--------|
+| 1  | 72  | 13 ms  | 17 ms  | 21 ms  | 100% `completed` |
+| 10 | 272 | 36 ms  | 48 ms  | 56 ms  | 100% `completed` |
+| 25 | 312 | 78 ms  | 112 ms | 158 ms | 100% `completed` |
+| 100 | 363–389 | 255–270 ms | 330–377 ms | 365–433 ms | 100% `completed` |
+
+After ~25 800 transfers: G2 (sum of balances per currency = 0) holds, G9 (balance = sum of postings) has
+0 mismatches, 0 active holds left, every transfer `completed`.
+
+**Reading the numbers.**
+- One transfer costs **~13 ms end to end** (gateway → transfers → 4 accounts RPCs → 6 short DB transactions).
+- Throughput flattens at **~370 transfers/s**, and at that point CPU is ~90% busy across all processes
+  (`accounts` ~70%, `transfers` ~55%, Postgres backends, gateway, the generator). The ceiling is the 4 vCPU box,
+  not locks or queues in the code: latency grows linearly with requests in flight (Little's law), no errors appear.
+- The Docker Desktop run above (~104 transfers/s, p50 1.6 s) is the same code: k6 capped at 200 VUs × 1.6 s ≈ 125 rps,
+  and the latency comes from the VM and port-forwarding overhead of Docker Desktop on Windows.
+- `p99 < 300 ms` holds up to ~310 transfers/s on this box (25 in flight).
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.load.yml up -d --build \
+  postgres redis redpanda accounts transfers notifications gateway
+for c in 1 10 25 100; do go run ./tests/load/gobench -users 100 -c $c -d 30s; done
+docker compose run --rm reconciler
+```
+
 ## Chaos
 
 Scripts under `tests/chaos/` exercise failure recovery with the same load compose overlay

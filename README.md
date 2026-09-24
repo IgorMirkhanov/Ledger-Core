@@ -72,8 +72,9 @@ demo ok: RUB=… USD=…
 
 ## Нагрузка (кратко)
 
-На ноутбуке с Docker Desktop (лимиты **отключены**): ~100 transfers/s, p50≈1.6s, **0% ошибок** на steady,
-reconciler **0** расхождений. Подробности и сценарии chaos: [docs/benchmarks.md](docs/benchmarks.md).
+Linux VM, 4 vCPU, весь стек на одной машине (лимиты **отключены**): **~13 мс** на перевод без очереди,
+**~310 переводов/с при p99 158 мс**, потолок ~370/с упирается в CPU; 0 ошибок, reconciler **0** расхождений
+после ~25 800 переводов. На ноутбуке с Docker Desktop: ~100/с (накладные расходы Docker Desktop). Подробности и сценарии chaos: [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Документация
 
