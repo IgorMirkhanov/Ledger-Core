@@ -153,3 +153,33 @@ components:
         amount: { type: string, pattern: "^[1-9][0-9]{0,18}$" }
         currency: { type: string }
         external_ref: { type: string }
+    StatementLine:
+      type: object
+      required: [posting_id, entry_id, kind, amount, balance_after, created_at]
+      properties:
+        posting_id: { type: string, description: Journal posting id as a decimal string (JS-safe) }
+        entry_id: { type: string, format: uuid }
+        kind: { type: string, enum: [deposit, withdrawal, transfer, reversal] }
+        amount: { type: string }
+        balance_after: { type: string }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+    Transfer:
+      type: object
+      required: [id, status, amount, currency, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        source_account_id: { type: string, format: uuid }
+        dest_account_id: { type: string, format: uuid }
+        amount: { type: string }
+        currency: { type: string }
+        dest_amount: { type: string }
+        dest_currency: { type: string }
+        fx_rate: { type: string, description: Decimal rate without trailing zeros; omitted when empty }
+        status: { type: string }
+        failure_code: { type: string, description: Omitted when empty }
+        failure_reason: { type: string, description: Omitted when empty }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time, description: Omitted when empty }

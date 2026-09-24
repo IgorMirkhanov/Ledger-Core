@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -221,10 +222,11 @@ func (a *API) GetStatement(w http.ResponseWriter, r *http.Request) {
 	}
 	lines := make([]map[string]any, 0, len(resp.GetLines()))
 	for _, l := range resp.GetLines() {
+		kind := strings.ToLower(strings.TrimPrefix(l.GetKind().String(), "ENTRY_KIND_"))
 		lines = append(lines, map[string]any{
-			"posting_id":    l.GetPostingId(),
+			"posting_id":    strconv.FormatInt(l.GetPostingId(), 10),
 			"entry_id":      l.GetEntryId(),
-			"kind":          strings.TrimPrefix(l.GetKind().String(), "ENTRY_KIND_"),
+			"kind":          kind,
 			"amount":        FormatAmount(l.GetAmount()),
 			"balance_after": FormatAmount(l.GetBalanceAfter()),
 			"description":   l.GetDescription(),
@@ -444,14 +446,24 @@ func transferJSON(t *transfersv1.Transfer) map[string]any {
 		"dest_account_id":   t.GetDestAccountId(),
 		"amount":            FormatAmount(t.GetAmount()),
 		"currency":          t.GetCurrency(),
-		"dest_amount":       FormatAmount(t.GetDestAmount()),
-		"dest_currency":     t.GetDestCurrency(),
-		"fx_rate":           t.GetFxRate(),
 		"status":            status,
-		"failure_code":      t.GetFailureCode(),
-		"failure_reason":    t.GetFailureReason(),
 		"created_at":        t.GetCreatedAt().AsTime().UTC().Format(time.RFC3339Nano),
 		"updated_at":        t.GetUpdatedAt().AsTime().UTC().Format(time.RFC3339Nano),
+	}
+	if t.GetDestAmount() != 0 {
+		out["dest_amount"] = FormatAmount(t.GetDestAmount())
+	}
+	if t.GetDestCurrency() != "" {
+		out["dest_currency"] = t.GetDestCurrency()
+	}
+	if fx := FormatFXRate(t.GetFxRate()); fx != "" {
+		out["fx_rate"] = fx
+	}
+	if c := t.GetFailureCode(); c != "" {
+		out["failure_code"] = c
+	}
+	if r := t.GetFailureReason(); r != "" {
+		out["failure_reason"] = r
 	}
 	if t.GetCompletedAt() != nil {
 		out["completed_at"] = t.GetCompletedAt().AsTime().UTC().Format(time.RFC3339Nano)
