@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - ingress.yaml
+# Pin every image to the released tag (set by the release workflow / `kustomize edit set image`).
+images:
+  - {name: ghcr.io/igormirkhanov/ledger-core-accounts, newTag: v0.1.0}
+  - {name: ghcr.io/igormirkhanov/ledger-core-transfers, newTag: v0.1.0}
+  - {name: ghcr.io/igormirkhanov/ledger-core-gateway, newTag: v0.1.0}
+  - {name: ghcr.io/igormirkhanov/ledger-core-notifications, newTag: v0.1.0}
+  - {name: ghcr.io/igormirkhanov/ledger-core-reconciler, newTag: v0.1.0}
+patches:
+  - target: {kind: ConfigMap, name: ledger-config}
+    patch: |-
+      - op: replace
+        path: /data/TRUSTED_PROXY_CIDRS
+        value: "10.0.0.0/8"

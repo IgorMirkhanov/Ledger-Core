@@ -85,6 +85,16 @@ load-rate-limit: ## Короткий тест, что IP-лимит отдаёт
 	@i=0; while [ $$i -lt 60 ]; do curl -sf http://localhost:8081/readyz >/dev/null && break; i=$$((i+1)); sleep 2; done
 	k6 run tests/load/rate_limit.js
 
+.PHONY: k8s-validate
+k8s-validate: ## Отрендерить и проверить манифесты Kubernetes (kustomize + kubeconform)
+	@for d in deploy/k8s/overlays/prod deploy/k8s/migrations; do \
+		kustomize build $$d | kubeconform -strict -summary -kubernetes-version 1.31.0 - || exit 1; done
+
+.PHONY: alerts-test
+alerts-test: ## Проверить и прогнать unit-тесты алертов Prometheus (нужен promtool)
+	promtool check rules deploy/prometheus/alerts.yml
+	promtool test rules deploy/prometheus/alerts_test.yml
+
 .PHONY: migration
 migration: ## Новая миграция: make migration svc=accounts name=add_x
 	goose -dir migrations/$(svc) create $(name) sql

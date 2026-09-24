@@ -86,6 +86,8 @@ Linux VM, 4 vCPU, весь стек на одной машине (лимиты *
 | [events.md](docs/events.md) | Kafka-топики и события |
 | [api.md](docs/api.md) | REST-контракт |
 | [benchmarks.md](docs/benchmarks.md) | k6 и chaos |
+| [operations.md](docs/operations.md) | Выкладка и runbook'и к алертам |
+| [production-readiness.md](docs/production-readiness.md) | Что готово к проду и что должна дать платформа |
 | [interview-notes.md](docs/interview-notes.md) | Вопросы на собеседовании |
 | [adr/](docs/adr) | Архитектурные решения |
 

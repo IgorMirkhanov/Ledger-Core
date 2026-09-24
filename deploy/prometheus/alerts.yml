@@ -1,0 +1,99 @@
+# Alerting rules. Every alert links to a runbook section in docs/operations.md.
+groups:
+  - name: ledger-money
+    rules:
+      - alert: LedgerReconciliationDiscrepancies
+        expr: ledger_reconciliation_discrepancies > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "Reconciler found {{ $value }} ledger discrepancies"
+          runbook: docs/operations.md#reconciliation-discrepancies
+      - alert: LedgerReconciliationStale
+        # The reconciler pushes after every run (daily). No push for 26h = the CronJob is not running.
+        expr: time() - push_time_seconds{job="reconciler"} > 26 * 3600
+        labels: {severity: warning}
+        annotations:
+          summary: "Reconciliation has not run for more than 26h"
+          runbook: docs/operations.md#reconciliation-discrepancies
+      - alert: SagaManualReview
+        expr: increase(ledger_saga_anomalies_total[15m]) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "Transfer saga anomaly (release of a captured hold) — manual review required"
+          runbook: docs/operations.md#manual-review-transfers
+
+  - name: ledger-slo
+    rules:
+      # SLO: 99.9% of POST /v1/transfers succeed (non-5xx). Fast burn over 1h/5m windows (14.4x budget).
+      - alert: TransfersErrorBudgetBurn
+        expr: |
+          (
+            sum(rate(http_requests_total{route="/v1/transfers",method="POST",status=~"5.."}[1h]))
+            / sum(rate(http_requests_total{route="/v1/transfers",method="POST"}[1h]))
+          ) > 14.4 * 0.001
+          and
+          (
+            sum(rate(http_requests_total{route="/v1/transfers",method="POST",status=~"5.."}[5m]))
+            / sum(rate(http_requests_total{route="/v1/transfers",method="POST"}[5m]))
+          ) > 14.4 * 0.001
+        labels: {severity: critical}
+        annotations:
+          summary: "POST /v1/transfers is burning the 99.9% error budget 14x too fast"
+          runbook: docs/operations.md#elevated-5xx
+      - alert: TransfersLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(http_request_duration_seconds_bucket{route="/v1/transfers",method="POST"}[5m]))
+          ) > 0.5
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "POST /v1/transfers p99 above 500ms for 10 minutes"
+          runbook: docs/operations.md#high-latency
+      - alert: TransfersStuckNonTerminal
+        # Created transfers should end completed or failed; a growing gap means sagas are stuck.
+        expr: |
+          sum(increase(ledger_transfers_total{status=~"completed|failed"}[30m]))
+          < 0.95 * sum(increase(rpc_requests_total{method="/ledger.transfers.v1.TransfersService/CreateTransfer",code="OK"}[30m]))
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Fewer than 95% of created transfers reached a terminal status in 30m"
+          runbook: docs/operations.md#stuck-transfers
+
+  - name: ledger-async
+    rules:
+      - alert: OutboxBacklogGrowing
+        expr: max by (service) (outbox_pending_events) > 1000
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }} outbox has {{ $value }} unpublished events (Kafka down or relay stuck)"
+          runbook: docs/operations.md#outbox-backlog
+      - alert: OutboxPublishErrors
+        expr: sum by (service) (rate(outbox_publish_errors_total[5m])) > 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }} outbox relay keeps failing to publish"
+          runbook: docs/operations.md#outbox-backlog
+      - alert: NotificationsDLQ
+        expr: sum(increase(kafka_consumer_messages_total{result="dlq"}[15m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Events were sent to ledger.notifications.dlq"
+          runbook: docs/operations.md#dlq
+      - alert: BackgroundWorkerErrors
+        expr: sum by (worker) (rate(worker_errors_total[5m])) > 0.1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Worker {{ $labels.worker }} is failing repeatedly"
+          runbook: docs/operations.md#worker-errors
+      - alert: RateLimiterFailOpen
+        expr: sum(rate(gateway_rate_limit_fail_open_total[5m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Redis unavailable: rate limiting is disabled (fail-open)"
+          runbook: docs/operations.md#rate-limiter-fail-open

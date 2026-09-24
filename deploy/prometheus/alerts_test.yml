@@ -1,0 +1,75 @@
+# promtool test rules deploy/prometheus/alerts_test.yml
+rule_files: [alerts.yml]
+evaluation_interval: 1m
+tests:
+  - name: reconciliation discrepancies page immediately
+    interval: 1m
+    input_series:
+      - series: ledger_reconciliation_discrepancies{job="reconciler"}
+        values: 0 0 3
+    alert_rule_test:
+      - {eval_time: 1m, alertname: LedgerReconciliationDiscrepancies, exp_alerts: []}
+      - eval_time: 2m
+        alertname: LedgerReconciliationDiscrepancies
+        exp_alerts:
+          - exp_labels: {severity: critical, job: reconciler}
+            exp_annotations:
+              summary: "Reconciler found 3 ledger discrepancies"
+              runbook: docs/operations.md#reconciliation-discrepancies
+
+  - name: one saga anomaly requires manual review
+    interval: 1m
+    input_series:
+      - series: ledger_saga_anomalies_total
+        values: 0x10 1x10
+    alert_rule_test:
+      - {eval_time: 5m, alertname: SagaManualReview, exp_alerts: []}
+      - eval_time: 15m
+        alertname: SagaManualReview
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "Transfer saga anomaly (release of a captured hold) — manual review required"
+              runbook: docs/operations.md#manual-review-transfers
+
+  - name: error budget burn needs both windows
+    interval: 1m
+    input_series:
+      # 1000 req/min, 5% errors from minute 0: both 1h and 5m ratios exceed 14.4 * 0.1%.
+      - series: http_requests_total{route="/v1/transfers",method="POST",status="201"}
+        values: 0+950x70
+      - series: http_requests_total{route="/v1/transfers",method="POST",status="503"}
+        values: 0+50x70
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: TransfersErrorBudgetBurn
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "POST /v1/transfers is burning the 99.9% error budget 14x too fast"
+              runbook: docs/operations.md#elevated-5xx
+
+  - name: healthy traffic does not burn the budget
+    interval: 1m
+    input_series:
+      - series: http_requests_total{route="/v1/transfers",method="POST",status="201"}
+        values: 0+1000x70
+      - series: http_requests_total{route="/v1/transfers",method="POST",status="503"}
+        values: 0+1x70
+    alert_rule_test:
+      - {eval_time: 65m, alertname: TransfersErrorBudgetBurn, exp_alerts: []}
+
+  - name: outbox backlog after 10 minutes
+    interval: 1m
+    input_series:
+      - series: outbox_pending_events{service="accounts"}
+        values: 5000x20
+    alert_rule_test:
+      - {eval_time: 5m, alertname: OutboxBacklogGrowing, exp_alerts: []}
+      - eval_time: 15m
+        alertname: OutboxBacklogGrowing
+        exp_alerts:
+          - exp_labels: {severity: warning, service: accounts}
+            exp_annotations:
+              summary: "accounts outbox has 5000 unpublished events (Kafka down or relay stuck)"
+              runbook: docs/operations.md#outbox-backlog

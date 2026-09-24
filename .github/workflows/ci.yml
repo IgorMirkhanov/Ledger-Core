@@ -64,7 +64,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [lint, test, openapi]
+    needs: [lint, test, openapi, k8s]
     strategy:
       matrix:
         service: [gateway, accounts, transfers, notifications, reconciler]
@@ -78,6 +78,26 @@ jobs:
           push: false
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  k8s:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26.8" }
+      - name: Render and validate manifests (Kubernetes 1.31, strict)
+        run: |
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
+          for dir in deploy/k8s/overlays/prod deploy/k8s/migrations; do
+            kustomize build "$dir" | kubeconform -strict -summary -kubernetes-version 1.31.0 -
+          done
+      - name: Validate and unit-test Prometheus alert rules
+        run: |
+          V=3.5.0
+          curl -sSL "https://github.com/prometheus/prometheus/releases/download/v${V}/prometheus-${V}.linux-amd64.tar.gz" | tar xz
+          ./prometheus-${V}.linux-amd64/promtool check rules deploy/prometheus/alerts.yml
+          ./prometheus-${V}.linux-amd64/promtool test rules deploy/prometheus/alerts_test.yml
 
   openapi:
     runs-on: ubuntu-latest

@@ -1,0 +1,124 @@
+# Run before every rollout: kubectl apply -k deploy/k8s/migrations && kubectl -n ledger wait --for=condition=complete job -l app.kubernetes.io/part-of=ledger-core --timeout=10m
+# Migrations are additive (docs/database.md), so the previous app version keeps working on the new schema.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-accounts
+  labels: {app.kubernetes.io/name: migrate-accounts, app.kubernetes.io/part-of: ledger-core}
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: migrate-accounts}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: migrate
+          image: ghcr.io/igormirkhanov/ledger-core-accounts:latest
+          envFrom:
+            - configMapRef: {name: ledger-config}
+          env:
+            - {name: SERVICE_NAME, value: accounts-migrate}
+            - {name: MIGRATE_ONLY, value: "true"}
+            - name: POSTGRES_DSN
+              valueFrom:
+                secretKeyRef: {name: ledger-secrets, key: ACCOUNTS_POSTGRES_DSN}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-transfers
+  labels: {app.kubernetes.io/name: migrate-transfers, app.kubernetes.io/part-of: ledger-core}
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: migrate-transfers}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: migrate
+          image: ghcr.io/igormirkhanov/ledger-core-transfers:latest
+          envFrom:
+            - configMapRef: {name: ledger-config}
+          env:
+            - {name: SERVICE_NAME, value: transfers-migrate}
+            - {name: MIGRATE_ONLY, value: "true"}
+            - name: POSTGRES_DSN
+              valueFrom:
+                secretKeyRef: {name: ledger-secrets, key: TRANSFERS_POSTGRES_DSN}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate-notifications
+  labels: {app.kubernetes.io/name: migrate-notifications, app.kubernetes.io/part-of: ledger-core}
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: migrate-notifications}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: migrate
+          image: ghcr.io/igormirkhanov/ledger-core-notifications:latest
+          envFrom:
+            - configMapRef: {name: ledger-config}
+          env:
+            - {name: SERVICE_NAME, value: notifications-migrate}
+            - {name: MIGRATE_ONLY, value: "true"}
+            - name: POSTGRES_DSN
+              valueFrom:
+                secretKeyRef: {name: ledger-secrets, key: NOTIFICATIONS_POSTGRES_DSN}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
