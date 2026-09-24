@@ -99,7 +99,7 @@ func run() error {
 
 	admin := httpx.NewServer("admin", cfg.AdminAddr, httpx.AdminHandler(
 		httpx.ReadinessCheck{Name: "postgres", Check: pool.Ping},
-		httpx.ReadinessCheck{Name: "kafka", Check: producer.Ping},
+		httpx.ReadinessCheck{Name: "kafka", Check: producer.Ping, Optional: true},
 	), log)
 
 	relay := outbox.NewRelay(pool, producer, outbox.RelayConfig{

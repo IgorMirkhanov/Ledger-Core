@@ -91,7 +91,7 @@ func run() error {
 	a := app.New(log, cfg.ShutdownTimeout)
 	a.Go(httpx.NewServer("admin", cfg.AdminAddr, httpx.AdminHandler(
 		httpx.ReadinessCheck{Name: "postgres", Check: pool.Ping},
-		httpx.ReadinessCheck{Name: "kafka", Check: pinger.Ping},
+		httpx.ReadinessCheck{Name: "kafka", Check: pinger.Ping, Optional: true},
 	), log))
 	a.Go(consumer)
 	a.Go(dispatcher)

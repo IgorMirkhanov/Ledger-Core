@@ -14,9 +14,15 @@ import (
 )
 
 // ReadinessCheck returns nil when a dependency is healthy.
+//
+// Only hard dependencies may make a pod unready: an unready pod is removed from load balancing,
+// so a check on a dependency the service can work without turns that dependency's outage into
+// a full outage. Mark such dependencies Optional: a failure is reported as "degraded: ..."
+// in the /readyz body but the status stays 200.
 type ReadinessCheck struct {
-	Name  string
-	Check func(ctx context.Context) error
+	Name     string
+	Check    func(ctx context.Context) error
+	Optional bool
 }
 
 // Server wraps http.Server as an app.Runner with graceful shutdown.
@@ -76,6 +82,10 @@ func AdminHandler(checks ...ReadinessCheck) http.Handler {
 		code := http.StatusOK
 		for _, c := range checks {
 			if err := c.Check(ctx); err != nil {
+				if c.Optional {
+					result[c.Name] = "degraded: " + err.Error()
+					continue
+				}
 				result[c.Name] = err.Error()
 				code = http.StatusServiceUnavailable
 			} else {

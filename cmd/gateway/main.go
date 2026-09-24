@@ -99,9 +99,9 @@ func run() error {
 	accountsHealth := healthpb.NewHealthClient(accountsConn)
 	transfersHealth := healthpb.NewHealthClient(transfersConn)
 	admin := httpx.AdminHandler(
-		httpx.ReadinessCheck{Name: "redis", Check: gateway.PingRedis(rdb)},
-		httpx.ReadinessCheck{Name: "accounts", Check: grpcReady(accountsHealth)},
-		httpx.ReadinessCheck{Name: "transfers", Check: grpcReady(transfersHealth)},
+		httpx.ReadinessCheck{Name: "redis", Check: gateway.PingRedis(rdb), Optional: true},
+		httpx.ReadinessCheck{Name: "accounts", Check: grpcReady(accountsHealth), Optional: true},
+		httpx.ReadinessCheck{Name: "transfers", Check: grpcReady(transfersHealth), Optional: true},
 	)
 
 	a := app.New(log, cfg.ShutdownTimeout)
