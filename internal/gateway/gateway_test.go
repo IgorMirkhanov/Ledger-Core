@@ -219,6 +219,15 @@ func TestClientIP_TrustedProxies(t *testing.T) {
 			require.Equal(t, tc.want, gateway.ClientIP(req, tc.trusted))
 		})
 	}
+
+	t.Run("multi-line XFF from trusted proxy", func(t *testing.T) {
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.0.0.5:1"
+		// Client-controlled first line, then balancer adds the real client as a separate header line.
+		req.Header.Add("X-Forwarded-For", "6.6.6.6")
+		req.Header.Add("X-Forwarded-For", "203.0.113.7")
+		require.Equal(t, "203.0.113.7", gateway.ClientIP(req, trusted))
+	})
 }
 
 func TestFormatFXRate(t *testing.T) {

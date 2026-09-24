@@ -69,7 +69,7 @@ func ClientIP(r *http.Request, trusted *TrustedProxies) string {
 	if trusted == nil || len(trusted.nets) == 0 || !trusted.contains(remote) {
 		return host
 	}
-	xff := r.Header.Get("X-Forwarded-For")
+	xff := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
 	if xff == "" {
 		return host
 	}
