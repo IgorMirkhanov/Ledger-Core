@@ -7,11 +7,12 @@ help: ## Показать команды
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: tools
-tools: ## Установить buf, protoc-gen-go, protoc-gen-go-grpc, goose
+tools: ## Установить buf, protoc-gen-go(-grpc), goose, golangci-lint (версия как в CI)
 	go install github.com/bufbuild/buf/cmd/buf@v1.57.2
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 	go install github.com/pressly/goose/v3/cmd/goose@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 
 .PHONY: proto
 proto: ## Сгенерировать gRPC-код из api/proto в gen/
