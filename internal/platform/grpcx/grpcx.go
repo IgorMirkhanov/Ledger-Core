@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/keepalive"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
@@ -61,9 +62,19 @@ type Server struct {
 	log    *slog.Logger
 }
 
+// serverKeepaliveMinTime is the most frequent client ping the server tolerates.
+// The gRPC default is 5 minutes: with ClientKeepaliveTime = 20s the server answers
+// GOAWAY ENHANCE_YOUR_CALM "too_many_pings" after ~30s and drops the connection,
+// failing in-flight RPCs with UNAVAILABLE. It must stay <= ClientKeepaliveTime.
+const serverKeepaliveMinTime = 10 * time.Second
+
 // NewServer creates a server with recovery + logging interceptors, health and reflection.
 func NewServer(addr string, log *slog.Logger, extra ...grpc.ServerOption) *Server {
 	opts := append([]grpc.ServerOption{
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             serverKeepaliveMinTime,
+			PermitWithoutStream: true,
+		}),
 		grpc.ChainUnaryInterceptor(
 			RecoveryInterceptor(log),
 			LoggingInterceptor(log),

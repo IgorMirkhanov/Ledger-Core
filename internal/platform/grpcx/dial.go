@@ -10,6 +10,10 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
+// ClientKeepaliveTime is how often clients ping an idle connection.
+// Servers must allow it: see serverKeepaliveMinTime in grpcx.go.
+const ClientKeepaliveTime = 20 * time.Second
+
 // Dial opens a client connection with insecure transport and keepalive.
 // addr may be "host:port" (wrapped as dns:///) or a full target URI.
 func Dial(addr string, extra ...grpc.DialOption) (*grpc.ClientConn, error) {
@@ -20,7 +24,7 @@ func Dial(addr string, extra ...grpc.DialOption) (*grpc.ClientConn, error) {
 	opts := append([]grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                20 * time.Second,
+			Time:                ClientKeepaliveTime,
 			Timeout:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
