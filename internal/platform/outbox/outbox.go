@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/observability"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/postgres"
 )
 
@@ -72,7 +73,7 @@ func (w *Writer) Add(ctx context.Context, q postgres.Querier, e Event) error {
 	if headers == nil {
 		headers = map[string]string{}
 	}
-	// TODO(prompt-03): inject W3C traceparent from ctx into headers (otel propagator).
+	observability.InjectTraceparent(ctx, observability.MapCarrier(headers))
 	hdr, err := json.Marshal(headers)
 	if err != nil {
 		return fmt.Errorf("outbox: marshal headers: %w", err)

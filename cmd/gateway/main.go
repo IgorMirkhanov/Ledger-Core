@@ -18,6 +18,7 @@ import (
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/grpcx"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/httpx"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/logger"
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/observability"
 )
 
 type Config struct {
@@ -47,6 +48,12 @@ func run() error {
 	}
 	log := logger.New(cfg.ServiceName, cfg.LogLevel)
 	slog.SetDefault(log)
+
+	ctx := context.Background()
+	shutdownTrace, err := observability.InitTracing(ctx, cfg.ServiceName, cfg.OTLPEndpoint)
+	if err != nil {
+		return err
+	}
 
 	accountsConn, err := grpcx.Dial(cfg.AccountsAddr)
 	if err != nil {
@@ -94,6 +101,7 @@ func run() error {
 	a.OnShutdown("accounts-grpc", func(context.Context) error { return accountsConn.Close() })
 	a.OnShutdown("transfers-grpc", func(context.Context) error { return transfersConn.Close() })
 	a.OnShutdown("redis", func(ctx context.Context) error { return rdb.Close() })
+	a.OnShutdown("otel", shutdownTrace)
 	return a.Run(context.Background())
 }
 

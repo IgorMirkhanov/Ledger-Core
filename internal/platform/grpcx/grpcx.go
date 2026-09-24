@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -22,6 +24,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/logger"
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/observability"
 )
 
 // Metadata keys propagated gateway → services → services.
@@ -68,9 +71,10 @@ type Server struct {
 // failing in-flight RPCs with UNAVAILABLE. It must stay <= ClientKeepaliveTime.
 const serverKeepaliveMinTime = 10 * time.Second
 
-// NewServer creates a server with recovery + logging interceptors, health and reflection.
+// NewServer creates a server with recovery + logging + metrics interceptors, health and reflection.
 func NewServer(addr string, log *slog.Logger, extra ...grpc.ServerOption) *Server {
 	opts := append([]grpc.ServerOption{
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime:             serverKeepaliveMinTime,
 			PermitWithoutStream: true,
@@ -78,7 +82,7 @@ func NewServer(addr string, log *slog.Logger, extra ...grpc.ServerOption) *Serve
 		grpc.ChainUnaryInterceptor(
 			RecoveryInterceptor(log),
 			LoggingInterceptor(log),
-			// TODO(prompt-03): otelgrpc stats handler + prometheus interceptor.
+			MetricsInterceptor(""),
 		),
 	}, extra...)
 	s := grpc.NewServer(opts...)
@@ -136,7 +140,11 @@ func RecoveryInterceptor(log *slog.Logger) grpc.UnaryServerInterceptor {
 func LoggingInterceptor(log *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		start := time.Now()
-		ctx = logger.With(ctx, slog.String("request_id", RequestID(ctx)), slog.String("method", info.FullMethod))
+		attrs := []any{slog.String("request_id", RequestID(ctx)), slog.String("method", info.FullMethod)}
+		if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+			attrs = append(attrs, slog.String("trace_id", sc.TraceID().String()))
+		}
+		ctx = logger.With(ctx, attrs...)
 		resp, err := handler(ctx, req)
 		code := status.Code(err)
 		lvl := slog.LevelInfo
@@ -147,6 +155,22 @@ func LoggingInterceptor(log *slog.Logger) grpc.UnaryServerInterceptor {
 			slog.String("code", code.String()),
 			slog.Duration("duration", time.Since(start)),
 			slog.Any("error", err))
+		return resp, err
+	}
+}
+
+// MetricsInterceptor records RED metrics for unary RPCs.
+func MetricsInterceptor(service string) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		start := time.Now()
+		resp, err := handler(ctx, req)
+		code := status.Code(err)
+		svc := service
+		if svc == "" {
+			svc = "unknown"
+		}
+		observability.RPCRequests.WithLabelValues(svc, info.FullMethod, code.String()).Inc()
+		observability.RPCDuration.WithLabelValues(svc, info.FullMethod).Observe(time.Since(start).Seconds())
 		return resp, err
 	}
 }

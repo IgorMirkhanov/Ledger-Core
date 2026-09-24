@@ -12,6 +12,7 @@ import (
 	"github.com/IgorMirkhanov/ledger-core/internal/accounts/domain"
 	"github.com/IgorMirkhanov/ledger-core/internal/money"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/idempotency"
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/observability"
 )
 
 const (
@@ -33,7 +34,7 @@ func (s *Service) runIdempotent(ctx context.Context, scope string, idem Idem, de
 			return err
 		}
 		if rec != nil {
-			// TODO(prompt-03): increment idempotency_replays_total.
+			observability.IdempotencyReplays.WithLabelValues("accounts", scope).Inc()
 			idempotency.MarkReplayed(ctx)
 			if err := json.Unmarshal(rec.Response, dest); err != nil {
 				return fmt.Errorf("accounts: replay %s: %w", scope, err)

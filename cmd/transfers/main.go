@@ -15,6 +15,7 @@ import (
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/idempotency"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/kafka"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/logger"
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/observability"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/outbox"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/postgres"
 	"github.com/IgorMirkhanov/ledger-core/internal/transfers/accountsclient"
@@ -54,6 +55,11 @@ func run() error {
 	log := logger.New(cfg.ServiceName, cfg.LogLevel)
 	slog.SetDefault(log)
 	ctx := context.Background()
+
+	shutdownTrace, err := observability.InitTracing(ctx, cfg.ServiceName, cfg.OTLPEndpoint)
+	if err != nil {
+		return err
+	}
 
 	pool, err := postgres.NewPool(ctx, cfg.Postgres)
 	if err != nil {
@@ -98,5 +104,6 @@ func run() error {
 	a.OnShutdown("accounts-client", func(context.Context) error { return accounts.Close() })
 	a.OnShutdown("postgres", func(context.Context) error { pool.Close(); return nil })
 	a.OnShutdown("kafka", producer.Close)
+	a.OnShutdown("otel", shutdownTrace)
 	return a.Run(ctx)
 }

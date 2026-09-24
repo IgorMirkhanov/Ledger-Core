@@ -12,6 +12,7 @@ import (
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/httpx"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/kafka"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/logger"
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/observability"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/postgres"
 	"github.com/IgorMirkhanov/ledger-core/migrations"
 )
@@ -39,6 +40,11 @@ func run() error {
 	log := logger.New(cfg.ServiceName, cfg.LogLevel)
 	slog.SetDefault(log)
 	ctx := context.Background()
+
+	shutdownTrace, err := observability.InitTracing(ctx, cfg.ServiceName, cfg.OTLPEndpoint)
+	if err != nil {
+		return err
+	}
 
 	pool, err := postgres.NewPool(ctx, cfg.Postgres)
 	if err != nil {
@@ -82,5 +88,6 @@ func run() error {
 	a.Go(dispatcher)
 	a.OnShutdown("kafka-ready", pinger.Close)
 	a.OnShutdown("postgres", func(context.Context) error { pool.Close(); return nil })
+	a.OnShutdown("otel", shutdownTrace)
 	return a.Run(ctx)
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/observability"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/outbox"
 )
 
@@ -215,7 +216,12 @@ func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) (bool, er
 		Value:     rec.Value,
 		Headers:   headerMap(rec),
 	}
-	// TODO(prompt-03): extract W3C traceparent from headers into ctx via the otel propagator.
+	// Extract W3C traceparent from Kafka headers into ctx for the handler span.
+	carrier := observability.MapCarrier{}
+	for k, v := range msg.Headers {
+		carrier[k] = v
+	}
+	ctx = observability.ExtractTraceparent(ctx, carrier)
 	if err := json.Unmarshal(rec.Value, &msg.Envelope); err != nil {
 		if err := c.publishDLQ(ctx, rec, fmt.Errorf("invalid envelope: %w", err), 0); err != nil {
 			return false, err

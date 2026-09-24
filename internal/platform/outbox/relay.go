@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/IgorMirkhanov/ledger-core/internal/platform/observability"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/postgres"
 )
 
@@ -94,6 +95,8 @@ func (r *Relay) runAsLeader(ctx context.Context) error {
 
 	ticker := time.NewTicker(r.cfg.PollInterval)
 	defer ticker.Stop()
+	pendingEvery := time.NewTicker(5 * time.Second)
+	defer pendingEvery.Stop()
 	for {
 		n, err := r.publishBatch(ctx)
 		if err != nil {
@@ -105,9 +108,19 @@ func (r *Relay) runAsLeader(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-pendingEvery.C:
+			r.refreshPending(ctx)
 		case <-ticker.C:
 		}
 	}
+}
+
+func (r *Relay) refreshPending(ctx context.Context) {
+	var n int64
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE published_at IS NULL`).Scan(&n); err != nil {
+		return
+	}
+	observability.OutboxPending.WithLabelValues(r.cfg.ServiceName).Set(float64(n))
 }
 
 // publishBatch publishes one batch inside a transaction and marks rows as published.
@@ -166,8 +179,11 @@ func (r *Relay) publishBatch(ctx context.Context) (int, error) {
 	if len(failedIDs) > 0 {
 		// Only after rollback: the rows are no longer locked by our own transaction.
 		r.recordFailure(context.WithoutCancel(ctx), failedIDs, err)
+		observability.OutboxPublishErrors.WithLabelValues(r.cfg.ServiceName).Add(float64(len(failedIDs)))
 	}
-	// TODO(prompt-03): metrics outbox_published_total, outbox_publish_errors_total, outbox_pending_events.
+	if published > 0 {
+		observability.OutboxPublished.WithLabelValues(r.cfg.ServiceName).Add(float64(published))
+	}
 	return published, err
 }
 

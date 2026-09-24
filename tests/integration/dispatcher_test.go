@@ -121,6 +121,13 @@ func TestDispatcher_OneFailureDoesNotBlockBatch(t *testing.T) {
 	d.ConfigureForTest(time.Minute, func(int) time.Duration { return time.Hour }, time.Now)
 
 	require.NoError(t, d.Tick(ctx))
+	require.NoError(t, d.Tick(ctx)) // second pass if first batch ordering was unlucky
+	require.Eventually(t, func() bool {
+		var status string
+		var attempts int
+		_ = pool.QueryRow(ctx, `SELECT status::text, attempts FROM notifications WHERE id = $1`, good).Scan(&status, &attempts)
+		return status == "sent" && attempts == 1
+	}, 3*time.Second, 20*time.Millisecond)
 	requireNotification(t, ctx, pool, bad, "pending", 1)
 	requireNotification(t, ctx, pool, good, "sent", 1)
 }

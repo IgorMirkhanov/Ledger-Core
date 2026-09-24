@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -36,7 +37,7 @@ func NewPool(ctx context.Context, cfg config.Postgres) (*pgxpool.Pool, error) {
 	pc.MaxConns = cfg.MaxConns
 	pc.MinConns = cfg.MinConns
 	pc.MaxConnLifetime = cfg.MaxConnLifetime
-	// TODO(prompt-03): add otelpgx tracer: pc.ConnConfig.Tracer = otelpgx.NewTracer()
+	pc.ConnConfig.Tracer = otelpgx.NewTracer()
 
 	pool, err := pgxpool.NewWithConfig(ctx, pc)
 	if err != nil {

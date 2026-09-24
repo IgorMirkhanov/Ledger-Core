@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/IgorMirkhanov/Ledger-Core/actions/workflows/ci.yml/badge.svg)](https://github.com/IgorMirkhanov/Ledger-Core/actions/workflows/ci.yml)
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8)
+![Coverage](https://img.shields.io/badge/coverage-internal-informational)
 
 Ядро банковского процессинга на Go: мультивалютные счета, **журнал с двойной записью**, холды,
 переводы через **saga** с компенсациями, **transactional outbox**, идемпотентность, сверка.
@@ -47,8 +48,16 @@ OpenTelemetry + Jaeger · Prometheus + Grafana · testcontainers-go · k6 · Doc
 ```bash
 make up                 # всё окружение в docker compose
 make logs
-scripts/demo.sh         # токен → счета → депозит → перевод USD→RUB → выписка (после этапа 3)
+scripts/demo.sh         # токен → счета → депозит → перевод USD→RUB → выписка
 make reconcile          # сверка инвариантов
+make load               # k6 (лимиты сняты через docker-compose.load.yml) + reconcile
+```
+
+Демо-сценарий (`scripts/demo.sh`) после `make up`:
+
+```text
+POST /v1/dev/token → create RUB+USD → deposit USD → FX transfer → statement
+demo ok: RUB=… USD=…
 ```
 
 | UI | URL |
@@ -59,7 +68,12 @@ make reconcile          # сверка инвариантов
 | Redpanda Console | http://localhost:8088 |
 | Prometheus | http://localhost:9090 |
 
-Разработка: `make help`, `make test` (unit + race), `make test-integration` (Docker), `make lint`, `make proto`.
+Разработка: `make help`, `make test`, `make test-integration`, `make lint`, `make proto`.
+
+## Нагрузка (кратко)
+
+На ноутбуке с Docker Desktop (лимиты **отключены**): ~190 transfers/s, p50≈1s, **0% ошибок**,
+reconciler **0** расхождений. Подробности и сценарии chaos: [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Документация
 
@@ -70,11 +84,11 @@ make reconcile          # сверка инвариантов
 | [saga.md](docs/saga.md) | Машина состояний перевода, обработка ошибок |
 | [events.md](docs/events.md) | Kafka-топики и события |
 | [api.md](docs/api.md) | REST-контракт |
-| [adr/](docs/adr) | Архитектурные решения и альтернативы |
-| [roadmap.md](docs/roadmap.md) | Этапы |
+| [benchmarks.md](docs/benchmarks.md) | k6 и chaos |
+| [interview-notes.md](docs/interview-notes.md) | Вопросы на собеседовании |
+| [adr/](docs/adr) | Архитектурные решения |
 
 ## Статус
 
-🚧 В разработке. Этап 0 (каркас) готов: архитектура, схема БД с инвариантами на уровне Postgres,
-gRPC-контракты, доменный слой с тестами, платформа (outbox relay, idempotency, graceful shutdown), CI.
-План: [docs/roadmap.md](docs/roadmap.md).
+Реализованы сервисы gateway, accounts, transfers, notifications, reconciler; интеграционные и
+нагрузочные сценарии; chaos-скрипты в `tests/chaos/`.

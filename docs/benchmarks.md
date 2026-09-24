@@ -88,3 +88,26 @@ k6 run tests/load/rate_limit.js
 ```
 
 Or `make load` / `make load-rate-limit` (requires `k6` on `PATH`).
+
+## Chaos
+
+Scripts under `tests/chaos/` exercise failure recovery with the same load compose overlay
+(`docker-compose.yml` + `docker-compose.load.yml`). Each script prints **PASS** or **FAIL**.
+
+| Scenario | Script | Expected outcome |
+|----------|--------|------------------|
+| Kill accounts mid-load | `kill_accounts_mid_load.sh` | k6 steady briefly; accounts killed ~10s then started; seeded transfers reach `completed`/`failed`; `reconcile` = 0 discrepancies |
+| Kill transfers mid-load | `kill_transfers.sh` | Same pattern for transfers; recovery worker advances in-flight sagas after restart; money consistent |
+| Kafka / Redpanda down | `kafka_down.sh` | Transfer create still works while Redpanda is stopped; `outbox` pending rows grow; after start, pending drains to 0; reconcile clean |
+| Postgres restart | `postgres_restart.sh` | Admin `/readyz` briefly 503 then 200; pre-created account balance unchanged; new transfer + reconcile succeed |
+
+**PASS criterion:** ledger money stays consistent (G1/G2/G9 via reconciler) and every observed transfer reaches a terminal status. Transient HTTP/gRPC errors during the outage window are expected; lost money or stuck non-terminal transfers are not.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.load.yml up -d --build \
+  postgres redis redpanda accounts transfers notifications gateway
+bash tests/chaos/kill_accounts_mid_load.sh
+bash tests/chaos/kill_transfers.sh
+bash tests/chaos/kafka_down.sh
+bash tests/chaos/postgres_restart.sh
+```
