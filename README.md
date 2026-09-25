@@ -1,6 +1,7 @@
 # Ledger Core
 
 [![CI](https://github.com/IgorMirkhanov/Ledger-Core/actions/workflows/ci.yml/badge.svg)](https://github.com/IgorMirkhanov/Ledger-Core/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/IgorMirkhanov/Ledger-Core)](https://github.com/IgorMirkhanov/Ledger-Core/releases/latest)
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8)
 ![Coverage](https://img.shields.io/badge/coverage-internal-informational)
 
@@ -67,6 +68,10 @@ demo ok: RUB=… USD=…
 | Grafana | http://localhost:3000 |
 | Redpanda Console | http://localhost:8088 |
 | Prometheus | http://localhost:9090 |
+
+Готовые образы каждого сервиса публикуются в GHCR при релизе, подписаны cosign, с SBOM и provenance:
+`ghcr.io/igormirkhanov/ledger-core-{gateway,accounts,transfers,notifications,reconciler}:0.1.0`
+([релиз](https://github.com/IgorMirkhanov/Ledger-Core/releases/latest), выкладка в Kubernetes: [operations.md](docs/operations.md)).
 
 Разработка: `make help`, `make test`, `make test-integration`, `make lint`, `make proto`.
 
