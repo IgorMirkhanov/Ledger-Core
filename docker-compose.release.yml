@@ -1,0 +1,25 @@
+# Run the stack from published, signed release images instead of building from source:
+#   make up-release                      # default release below
+#   LEDGER_VERSION=0.1.0 make up-release
+# Infrastructure (Postgres, Kafka, Redis, observability) is the same as in docker-compose.yml.
+services:
+  accounts:
+    image: ghcr.io/igormirkhanov/ledger-core-accounts:${LEDGER_VERSION:-0.1.0}
+    build: !reset null
+    pull_policy: always
+  transfers:
+    image: ghcr.io/igormirkhanov/ledger-core-transfers:${LEDGER_VERSION:-0.1.0}
+    build: !reset null
+    pull_policy: always
+  notifications:
+    image: ghcr.io/igormirkhanov/ledger-core-notifications:${LEDGER_VERSION:-0.1.0}
+    build: !reset null
+    pull_policy: always
+  gateway:
+    image: ghcr.io/igormirkhanov/ledger-core-gateway:${LEDGER_VERSION:-0.1.0}
+    build: !reset null
+    pull_policy: always
+  reconciler:
+    image: ghcr.io/igormirkhanov/ledger-core-reconciler:${LEDGER_VERSION:-0.1.0}
+    build: !reset null
+    pull_policy: always
