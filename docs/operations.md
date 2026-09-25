@@ -3,6 +3,19 @@
 Runbook для дежурного. Каждый алерт из `deploy/prometheus/alerts.yml` ссылается на раздел этого документа.
 Манифесты: `deploy/k8s`. Готовность к проду и открытые пункты: [production-readiness.md](production-readiness.md).
 
+## Выпуск релиза
+
+Actions → **Release** → Run workflow (ветка `main`), `version` = `vX.Y.Z`. Workflow сам ставит тег на
+текущий `main`, собирает и сканирует образы (Trivy), публикует их в GHCR с SBOM и provenance,
+подписывает cosign и создаёт GitHub Release с номерами образов. Альтернатива: `git push origin vX.Y.Z`.
+
+```bash
+# проверка подписи образа
+cosign verify ghcr.io/igormirkhanov/ledger-core-gateway:X.Y.Z \
+  --certificate-identity-regexp 'https://github.com/IgorMirkhanov/Ledger-Core/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 ## Выкладка
 
 Порядок важен: миграции только добавляют (docs/database.md), поэтому старая версия приложения
