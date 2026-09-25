@@ -59,7 +59,7 @@ services:
       redpanda: { condition: service_healthy }
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.115.0
+    image: otel/opentelemetry-collector-contrib:0.115.1
     command: ["--config=/etc/otel/collector.yml"]
     volumes: ["./deploy/otel/collector.yml:/etc/otel/collector.yml:ro"]
 

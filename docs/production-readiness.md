@@ -42,8 +42,8 @@
 ### Поставка
 - CI: lint, buf, unit с `-race` и порогом покрытия ядра 70%, integration (testcontainers), govulncheck,
   проверка манифестов, unit-тесты алертов (`promtool test rules`), сборка образов.
-- Release по тегу `vX.Y.Z`: сканирование образов (Trivy) в отдельной джобе без прав на запись →
-  публикация в GHCR с SBOM и provenance → подпись cosign (keyless).
+- Release по тегу `vX.Y.Z` или ручным запуском (workflow сам ставит тег на `main`): сканирование образов (Trivy) в отдельной джобе без прав на запись →
+  публикация в GHCR с SBOM и provenance → подпись cosign (keyless) → GitHub Release.
 - Dependabot для Go-модулей, GitHub Actions и базовых образов.
 - Go toolchain закреплён на патч-версии (go1.26.8), distroless nonroot образы.
 

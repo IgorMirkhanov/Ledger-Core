@@ -11,6 +11,10 @@ import (
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/observability"
 	"github.com/IgorMirkhanov/ledger-core/internal/platform/outbox"
@@ -208,6 +212,36 @@ func (c *Consumer) handlePartition(ctx context.Context, recs []*kgo.Record) erro
 }
 
 func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) (bool, error) {
+	ctx, span := startConsumerSpan(ctx, rec)
+	defer span.End()
+	done, err := c.processTraced(ctx, rec)
+	if err != nil && !errors.Is(err, errShutdown) {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return done, err
+}
+
+// startConsumerSpan continues the producer's trace (W3C traceparent in the record headers)
+// with a CONSUMER span, so one transfer is visible from the HTTP request to the notification.
+func startConsumerSpan(ctx context.Context, rec *kgo.Record) (context.Context, trace.Span) {
+	carrier := observability.MapCarrier{}
+	for _, h := range rec.Headers {
+		carrier[h.Key] = string(h.Value)
+	}
+	ctx = observability.ExtractTraceparent(ctx, carrier)
+	return otel.Tracer("ledger-core/kafka").Start(ctx, "process "+rec.Topic,
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "kafka"),
+			attribute.String("messaging.operation.type", "process"),
+			attribute.String("messaging.destination.name", rec.Topic),
+			attribute.Int("messaging.destination.partition.id", int(rec.Partition)),
+			attribute.Int64("messaging.kafka.offset", rec.Offset),
+		))
+}
+
+func (c *Consumer) processTraced(ctx context.Context, rec *kgo.Record) (bool, error) {
 	msg := Message{
 		Topic:     rec.Topic,
 		Partition: rec.Partition,
@@ -216,12 +250,6 @@ func (c *Consumer) processRecord(ctx context.Context, rec *kgo.Record) (bool, er
 		Value:     rec.Value,
 		Headers:   headerMap(rec),
 	}
-	// Extract W3C traceparent from Kafka headers into ctx for the handler span.
-	carrier := observability.MapCarrier{}
-	for k, v := range msg.Headers {
-		carrier[k] = v
-	}
-	ctx = observability.ExtractTraceparent(ctx, carrier)
 	if err := json.Unmarshal(rec.Value, &msg.Envelope); err != nil {
 		if err := c.publishDLQ(ctx, rec, fmt.Errorf("invalid envelope: %w", err), 0); err != nil {
 			return false, err
