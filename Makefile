@@ -43,6 +43,10 @@ cover: ## Покрытие unit-тестами
 up: ## Поднять всё окружение
 	docker compose up -d --build
 
+.PHONY: up-release
+up-release: ## Поднять всё из опубликованных образов релиза (без сборки; LEDGER_VERSION=0.1.0)
+	docker compose -f docker-compose.yml -f docker-compose.release.yml up -d
+
 .PHONY: up-load
 up-load: ## Окружение с отключёнными rate limit (для k6 / chaos)
 	docker compose -f docker-compose.yml -f docker-compose.load.yml up -d --build

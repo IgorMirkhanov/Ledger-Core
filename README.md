@@ -47,7 +47,8 @@ OpenTelemetry + Jaeger · Prometheus + Grafana · testcontainers-go · k6 · Doc
 ## Быстрый старт
 
 ```bash
-make up                 # всё окружение в docker compose
+make up                 # всё окружение в docker compose (сборка из исходников)
+make up-release         # то же из готовых подписанных образов релиза, без Go и сборки
 make logs
 scripts/demo.sh         # токен → счета → депозит → перевод USD→RUB → выписка
 make reconcile          # сверка инвариантов
