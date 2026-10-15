@@ -7,7 +7,7 @@ toolchain go1.26.8
 require (
 	github.com/alicebob/miniredis/v2 v2.39.0
 	github.com/caarlos0/env/v11 v11.4.1
-	github.com/exaring/otelpgx v0.12.0
+	github.com/exaring/otelpgx v0.13.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-redis/redis_rate/v10 v10.0.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
